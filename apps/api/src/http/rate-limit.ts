@@ -1,6 +1,7 @@
 import type { Container } from '@lodgent/application';
 import type { FastifyRequest } from 'fastify';
 import { resolveAgent } from './agent-auth';
+import { clientKey } from './security';
 
 /**
  * Rate limits for the agent surface: partners (valid API key) are limited per key, everyone else per
@@ -23,7 +24,7 @@ export function agentRateLimit(container: Container, override?: number) {
     timeWindow: '1 minute',
     keyGenerator: async (req: FastifyRequest) => {
       const partner = await partnerOf(req);
-      return partner ? `partner:${partner.id}` : `ip:${req.ip}`;
+      return partner ? `partner:${partner.id}` : `ip:${clientKey(req.ip)}`;
     },
   };
 }

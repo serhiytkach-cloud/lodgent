@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -9,6 +8,7 @@ import { registerCardDataGuard } from './http/card-guard';
 import { registerErrorHandler } from './http/errors';
 import { buildOpenApi } from './http/openapi';
 import { Router } from './http/router';
+import { BODY_LIMITS, corsOptionsFor, requestIdFor, serializeRequest } from './http/security';
 import { registerMcpEndpoint } from './mcp/server';
 import { registerAccountRoutes } from './routes/account';
 import { registerAgentRoutes } from './routes/agent';
@@ -38,44 +38,47 @@ export interface App {
 export async function buildApp(container: Container): Promise<App> {
   const { config } = container;
   const server = Fastify({
-    loggerInstance: container.logger as FastifyBaseLogger,
+    // Request URLs are logged with checkout tokens, webhook secrets and OAuth codes masked.
+    loggerInstance: container.logger.child(
+      {},
+      { serializers: { req: serializeRequest } },
+    ) as FastifyBaseLogger,
     // Behind the ALB in production: trust exactly one proxy hop for the client IP (rate limits, logs).
     trustProxy: config.isProduction ? (_address: string, hop: number) => hop === 0 : false,
-    bodyLimit: 1024 * 1024,
+    bodyLimit: BODY_LIMITS.default,
     // Signed checkout tokens travel as a path segment (~120 chars).
     routerOptions: { maxParamLength: 600 },
-    requestIdHeader: 'x-request-id',
-    genReqId: () => randomUUID(),
+    requestIdHeader: false,
+    genReqId: requestIdFor,
   });
 
+  // JSON bodies keep their exact bytes (webhook signatures, card-data guard) and are parsed with
+  // Fastify's hardened parser: invalid JSON is a 400 and `__proto__`/`constructor.prototype` keys are
+  // rejected rather than parsed (prototype poisoning).
+  const parseJson = server.getDefaultJsonParser('error', 'error');
   server.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
     const buffer = body as Buffer;
     req.rawBody = buffer;
     if (buffer.length === 0) return done(null, undefined);
-    try {
-      done(null, JSON.parse(buffer.toString('utf8')));
-    } catch {
-      const error = Object.assign(new Error('Body is not valid JSON'), { statusCode: 400 });
-      done(error, undefined);
-    }
+    parseJson(req, buffer.toString('utf8'), done);
   });
 
   await server.register(helmet, {
-    contentSecurityPolicy: false,
+    // The API serves JSON only: nothing may load, run or frame it.
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"] },
+    },
+    // Agents in browsers may read public agent responses.
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    strictTransportSecurity: config.isProduction
+      ? { maxAge: 63_072_000, includeSubDomains: true, preload: false }
+      : false,
+    frameguard: { action: 'deny' },
+    referrerPolicy: { policy: 'no-referrer' },
   });
   await server.register(cors, {
-    origin: true,
-    credentials: false,
-    exposedHeaders: ['Mcp-Session-Id', 'X-Request-Id'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Api-Key',
-      'Mcp-Session-Id',
-      'Mcp-Protocol-Version',
-      'X-Request-Id',
-    ],
+    delegator: (req, callback) => callback(null, corsOptionsFor(req.url, config.webBaseUrl)),
   });
   await server.register(rateLimit, { global: false });
   registerErrorHandler(server);
@@ -83,6 +86,8 @@ export async function buildApp(container: Container): Promise<App> {
 
   server.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
+    // Responses carry tenant data, guest details or capability links: never store them in caches.
+    if (!reply.hasHeader('cache-control')) reply.header('cache-control', 'no-store');
   });
 
   const router = new Router(server, container);

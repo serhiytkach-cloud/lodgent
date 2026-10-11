@@ -27,14 +27,14 @@ const EnvSchema = z.object({
   WEB_BASE_URL: z.url().default('http://localhost:3000'),
   API_BASE_URL: z.url().default('http://localhost:4000'),
   API_PORT: int(4000),
-  INTERNAL_API_TOKEN: z.string().min(8).default(DEV_SECRETS.internalApiToken),
+  INTERNAL_API_TOKEN: z.preprocess(blank, z.string().min(8).default(DEV_SECRETS.internalApiToken)),
 
   DATABASE_URL: z.string().default('postgres://lodgent:lodgent@localhost:5432/lodgent'),
   DATABASE_SSL: bool(false),
   DATABASE_POOL_MAX: int(10),
 
   AUTH_PROVIDER: z.enum(['dev', 'cognito']).default('dev'),
-  AUTH_DEV_SECRET: z.string().min(32).default(DEV_SECRETS.authDevSecret),
+  AUTH_DEV_SECRET: z.preprocess(blank, z.string().min(32).default(DEV_SECRETS.authDevSecret)),
   COGNITO_USER_POOL_ID: optionalString,
   COGNITO_CLIENT_ID: optionalString,
 
@@ -90,7 +90,7 @@ const EnvSchema = z.object({
   OFFER_CACHE_TTL_SECONDS: int(60),
   OFFER_VALIDITY_MINUTES: int(30),
   /** Root secret for signed tokens (OAuth state, checkout links); per-purpose keys are derived from it. */
-  SIGNING_SECRET: z.string().min(32).default(DEV_SECRETS.signingSecret),
+  SIGNING_SECRET: z.preprocess(blank, z.string().min(32).default(DEV_SECRETS.signingSecret)),
   PII_RETENTION_DAYS: int(30),
   VISIBILITY_RAW_RETENTION_DAYS: int(90),
   VISIBILITY_DEFAULT_MONTHLY_CAP_CENTS: int(5000),
@@ -290,25 +290,122 @@ export function loadConfig(source: Record<string, string | undefined> = process.
   return config;
 }
 
-function assertProductionReady(config: AppConfig): void {
+/** Minimum length of production secrets (32 random bytes encode to 43+ characters; 32 is the floor). */
+const MIN_SECRET_LENGTH = 32;
+
+/** A secret that is long enough and not obviously patterned (e.g. a repeated word). */
+function weakSecret(value: string): boolean {
+  return value.length < MIN_SECRET_LENGTH || new Set(value).size < 16;
+}
+
+function isHttps(url: string): boolean {
+  return url.startsWith('https://');
+}
+
+/**
+ * Production refuses to start with development defaults, fakes, local stand-ins or weak secrets.
+ * Every problem is reported at once so an operator can fix the environment in one pass.
+ */
+export function assertProductionReady(config: AppConfig): void {
   const problems: string[] = [];
-  if (config.auth.provider !== 'cognito') problems.push('AUTH_PROVIDER must be cognito');
-  if (config.kms.provider !== 'aws') problems.push('KMS_PROVIDER must be aws');
-  if (config.internalApiToken === DEV_SECRETS.internalApiToken)
-    problems.push('INTERNAL_API_TOKEN uses the dev default');
-  if (config.signingSecret === DEV_SECRETS.signingSecret)
-    problems.push('SIGNING_SECRET uses the dev default');
-  if (config.stripe.secretKey === DEV_SECRETS.stripeSecretKey) problems.push('STRIPE_SECRET_KEY is not set');
-  if (config.stripe.webhookSecrets.includes(DEV_SECRETS.stripeWebhookSecret))
-    problems.push('STRIPE_WEBHOOK_SECRET is not set');
-  if (config.stripe.apiBaseUrl) problems.push('STRIPE_API_BASE_URL must be blank in production');
-  if (config.crawler.allowPrivateNetworks)
-    problems.push('CRAWL_ALLOW_PRIVATE_NETWORKS must be off in production');
-  if (config.apaleo.clientId === DEV_SECRETS.apaleoClientId) problems.push('APALEO_CLIENT_ID is not set');
-  if (config.apaleo.webhookToken === 'dev-apaleo-webhook-token')
-    problems.push('APALEO_WEBHOOK_TOKEN uses the dev default');
+  const check = (failed: boolean, problem: string) => {
+    if (failed) problems.push(problem);
+  };
+
+  // Identity: Cognito only. The dev secret signs nothing in production, but a public value must
+  // never be configured (and it must not double as another secret).
+  check(config.auth.provider !== 'cognito', 'AUTH_PROVIDER must be cognito');
+  check(config.auth.devSecret === DEV_SECRETS.authDevSecret, 'AUTH_DEV_SECRET uses the dev default');
+
+  // Token encryption: KMS only; the local master key is never used in production.
+  check(config.kms.provider !== 'aws', 'KMS_PROVIDER must be aws (LOCAL_KMS_MASTER_KEY is for development)');
+
+  // Our own secrets.
+  check(config.internalApiToken === DEV_SECRETS.internalApiToken, 'INTERNAL_API_TOKEN uses the dev default');
+  check(
+    config.internalApiToken.length < MIN_SECRET_LENGTH,
+    `INTERNAL_API_TOKEN must be at least ${MIN_SECRET_LENGTH} characters`,
+  );
+  check(config.signingSecret === DEV_SECRETS.signingSecret, 'SIGNING_SECRET uses the dev default');
+  check(
+    weakSecret(config.signingSecret),
+    `SIGNING_SECRET must be at least ${MIN_SECRET_LENGTH} random characters`,
+  );
+  const shared = [
+    config.signingSecret,
+    config.auth.devSecret,
+    config.internalApiToken,
+    config.apaleo.webhookToken,
+  ];
+  check(
+    new Set(shared).size !== shared.length,
+    'SIGNING_SECRET, AUTH_DEV_SECRET, INTERNAL_API_TOKEN and APALEO_WEBHOOK_TOKEN must all differ',
+  );
+
+  // Stripe: real keys, real API, verified webhooks.
+  check(
+    config.stripe.secretKey === DEV_SECRETS.stripeSecretKey || !/^(sk|rk)_/.test(config.stripe.secretKey),
+    'STRIPE_SECRET_KEY is not set',
+  );
+  check(
+    config.stripe.publishableKey === DEV_SECRETS.stripePublishableKey ||
+      !config.stripe.publishableKey.startsWith('pk_'),
+    'STRIPE_PUBLISHABLE_KEY is not set',
+  );
+  check(
+    config.stripe.webhookSecrets.some(
+      (secret) => secret === DEV_SECRETS.stripeWebhookSecret || !secret.startsWith('whsec_'),
+    ),
+    'STRIPE_WEBHOOK_SECRET is not set',
+  );
+  check(!!config.stripe.apiBaseUrl, 'STRIPE_API_BASE_URL must be blank in production');
+
+  // Apaleo: real app credentials over TLS, unguessable webhook path.
+  check(config.apaleo.clientId === DEV_SECRETS.apaleoClientId, 'APALEO_CLIENT_ID is not set');
+  check(config.apaleo.clientSecret === DEV_SECRETS.apaleoClientSecret, 'APALEO_CLIENT_SECRET is not set');
+  check(
+    config.apaleo.webhookToken === 'dev-apaleo-webhook-token',
+    'APALEO_WEBHOOK_TOKEN uses the dev default',
+  );
+  check(
+    weakSecret(config.apaleo.webhookToken),
+    `APALEO_WEBHOOK_TOKEN must be at least ${MIN_SECRET_LENGTH} random characters`,
+  );
+  check(
+    ![config.apaleo.identityUrl, config.apaleo.apiUrl, config.apaleo.webhookUrl].every(isHttps),
+    'APALEO_IDENTITY_URL, APALEO_API_URL and APALEO_WEBHOOK_URL must use https',
+  );
+
+  // Public URLs and transport.
+  check(!isHttps(config.webBaseUrl), 'WEB_BASE_URL must use https');
+  check(!isHttps(config.apiBaseUrl), 'API_BASE_URL must use https');
+  check(!config.database.ssl, 'DATABASE_SSL must be true');
+  check(
+    usesDevDatabaseLogin(config.database.url),
+    'The database login uses the local development credentials',
+  );
+  check(!!config.aws.endpointUrl, 'AWS_ENDPOINT_URL must be blank in production (it points at LocalStack)');
+  check(
+    config.email.provider === 'smtp' && /^smtps?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(config.email.smtpUrl),
+    'EMAIL_PROVIDER=smtp points at the local mail catcher',
+  );
+
+  // Outbound requests built from hotel input.
+  check(config.crawler.allowPrivateNetworks, 'CRAWL_ALLOW_PRIVATE_NETWORKS must be off in production');
+
   if (problems.length > 0)
     throw new ConfigError(`Production configuration is incomplete: ${problems.join('; ')}`);
+}
+
+function usesDevDatabaseLogin(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      decodeURIComponent(parsed.username) === 'lodgent' && decodeURIComponent(parsed.password) === 'lodgent'
+    );
+  } catch {
+    return false;
+  }
 }
 
 function required(value: string | undefined, name: string): string {

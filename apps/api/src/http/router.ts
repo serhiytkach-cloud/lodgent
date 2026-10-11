@@ -11,6 +11,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { type AgentContext, resolveAgent } from './agent-auth';
 import { agentRateLimit } from './rate-limit';
+import { BODY_LIMITS, clientKey } from './security';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -55,6 +56,8 @@ export interface RouteDef<M extends AuthMode, P, Q, B, R> {
   rateLimitPerMinute?: number;
   /** Accept a raw body (webhooks verify signatures over the exact bytes). */
   rawBody?: boolean;
+  /** Maximum request body in bytes; defaults depend on the audience (see BODY_LIMITS). */
+  bodyLimit?: number;
   handler: (
     input: { params: P; query: Q; body: B; req: FastifyRequest; reply: FastifyReply } & AuthFor<M>,
   ) => Promise<R>;
@@ -74,6 +77,19 @@ function parseInput<T>(schema: z.ZodType<T> | undefined, value: unknown, where: 
     });
   }
   return result.data;
+}
+
+function defaultBodyLimit(audience: Audience): number {
+  switch (audience) {
+    case 'agent':
+      return BODY_LIMITS.agent;
+    case 'checkout':
+      return BODY_LIMITS.checkout;
+    case 'webhook':
+      return BODY_LIMITS.webhook;
+    default:
+      return BODY_LIMITS.default;
+  }
 }
 
 function bearerToken(req: FastifyRequest): string | null {
@@ -99,6 +115,7 @@ export class Router {
     this.app.route({
       method: def.method,
       url: def.path,
+      bodyLimit: def.bodyLimit ?? defaultBodyLimit(def.audience),
       config: {
         rawBody: def.rawBody ?? false,
         rateLimit:
@@ -107,7 +124,7 @@ export class Router {
             : {
                 max: limit,
                 timeWindow: '1 minute',
-                keyGenerator: (req: FastifyRequest) => `ip:${req.ip}`,
+                keyGenerator: (req: FastifyRequest) => `ip:${clientKey(req.ip)}`,
               },
       },
       handler: async (req, reply) => {

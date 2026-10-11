@@ -19,6 +19,7 @@ import type { FastifyInstance } from 'fastify';
 import type { z } from 'zod';
 import { resolveAgent } from '../http/agent-auth';
 import { agentRateLimit } from '../http/rate-limit';
+import { BODY_LIMITS } from '../http/security';
 import { toCaller } from '../routes/agent';
 
 export const MCP_INSTRUCTIONS = `${BRAND.name} connects you to independent hotels that sell direct, with live prices from each hotel's own system.
@@ -209,6 +210,7 @@ export function registerMcpEndpoint(server: FastifyInstance, container: Containe
   server.route({
     method: ['GET', 'POST', 'DELETE'],
     url: '/mcp',
+    bodyLimit: BODY_LIMITS.agent,
     config: { rateLimit: agentRateLimit(container) },
     handler: async (req, reply) => {
       const caller = toCaller(await resolveAgent(req, container));

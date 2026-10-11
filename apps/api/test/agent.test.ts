@@ -295,7 +295,8 @@ describe('REST agent API', () => {
       async ({ tx }) => (await tx.execute(sql`select row_to_json(q)::text as j from agent_queries q`)).rows,
     );
     const dump = everything.map((r) => String(r.j)).join('\n');
-    expect(dump).not.toMatch(/jane|example\.com|555|anniversary/);
+    // (The phone number is matched whole: a bare "555" also occurs in random ids and timestamps.)
+    expect(dump).not.toMatch(/jane|example\.com|843 555 0100|anniversary/);
 
     // The hotel sees its own funnel events.
     const events = await app.container.db.tenant(

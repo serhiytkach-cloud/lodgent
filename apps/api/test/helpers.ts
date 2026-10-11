@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { type Adapters, createContainer, loadConfig, MemoryMailer } from '@lodgent/application';
+import {
+  type Adapters,
+  type AppConfig,
+  createContainer,
+  loadConfig,
+  MemoryMailer,
+} from '@lodgent/application';
 import { cloneDatabase } from '@lodgent/db/testing';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { inject } from 'vitest';
@@ -29,16 +35,20 @@ export function uniqueEmail(prefix = 'user'): string {
 export async function createTestApp(
   env: Record<string, string> = {},
   overrides: Partial<Adapters> = {},
+  /** Adjusts the loaded config, e.g. to exercise production-only behaviour without production secrets. */
+  configure: (config: AppConfig) => AppConfig = (config) => config,
 ): Promise<TestApp> {
   // Each test file gets its own database cloned from the migrated template, so background work
   // (outbox dispatch, jobs) in one file never sees another file's rows.
   const database = await cloneDatabase(inject('databaseUrl'));
-  const config = loadConfig({
-    APP_ENV: 'test',
-    LOG_LEVEL: 'silent',
-    DATABASE_URL: database.url,
-    ...env,
-  });
+  const config = configure(
+    loadConfig({
+      APP_ENV: 'test',
+      LOG_LEVEL: 'silent',
+      DATABASE_URL: database.url,
+      ...env,
+    }),
+  );
   const mailer = new MemoryMailer();
   const container = createContainer(config, { mailer, name: 'api-test', ...overrides });
   await container.init();
