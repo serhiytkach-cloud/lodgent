@@ -1,5 +1,6 @@
 import { Writable } from 'node:stream';
 import { UpstreamError } from '@lodgent/core';
+import type { Database, NewAgentEvent, NewAgentQuery } from '@lodgent/db';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
 import { DEV_SECRETS } from '../src/config';
@@ -12,6 +13,7 @@ import {
   serializeRequest,
   truncateIp,
 } from '../src/logging';
+import { AgentLog } from '../src/services/agent-log';
 
 /** A pino logger with the production privacy options, writing JSON lines into memory. */
 function memoryLogger() {
@@ -129,5 +131,45 @@ describe('pseudonymous guest references', () => {
     expect(
       new Signer(`${DEV_SECRETS.signingSecret}-other`).digest('guest-ref', 'org-1\nana@example.com'),
     ).not.toBe(a);
+  });
+});
+
+describe('agent query log', () => {
+  it('masks contact details in free-text fields before they are stored', async () => {
+    const queries: NewAgentQuery[] = [];
+    const events: NewAgentEvent[] = [];
+    const db = {
+      system: async <T>(fn: (repos: unknown) => Promise<T>) =>
+        fn({
+          agentLog: {
+            insertQuery: async (values: NewAgentQuery) => {
+              queries.push(values);
+              return 'q-1';
+            },
+            insertEvents: async (values: NewAgentEvent[]) => {
+              events.push(...values);
+            },
+          },
+        }),
+    } as unknown as Database;
+    const log = new AgentLog(db, pino({ level: 'silent' }));
+    await log.record(
+      {
+        partnerId: null,
+        channel: 'mcp',
+        clientName: 'bot for ana@example.com',
+        utm: { source: 'https://tracker.test/?id=123456', medium: null, campaign: null },
+      },
+      { tool: 'search_hotels', destination: 'Lisbon, for ana@example.com, call +351 912 345 678' },
+      [{ organizationId: 'o-1', propertyId: 'p-1', kind: 'search_impression', rank: 1 }],
+    );
+    const stored = JSON.stringify({ queries, events });
+    expect(queries[0]).toMatchObject({
+      destination: 'Lisbon, for [email] call [number]',
+      clientName: 'bot for [email]',
+      utmSource: '[url]',
+    });
+    expect(events[0]).toMatchObject({ clientName: 'bot for [email]', queryId: 'q-1' });
+    expect(stored).not.toMatch(/ana@|912|example\.com/);
   });
 });

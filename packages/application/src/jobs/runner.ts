@@ -3,6 +3,7 @@ import type { Clock } from '@lodgent/core';
 import type { Database } from '@lodgent/db';
 import type { Logger } from 'pino';
 import { z } from 'zod';
+import { scrubEmails } from '../logging';
 import { type JobHandler, RetryLaterError } from './registry';
 
 const LEASE_SECONDS = 300;
@@ -48,7 +49,8 @@ export class PgJobRunner {
         await runHandler(handlers, job.type, job.payload, job.attempts, logger);
         await db.system(({ jobs: repo }) => repo.complete(job.id, clock.now()));
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        // Stored on the job row: provider messages can quote addresses, which never belong there.
+        const message = scrubEmails(error instanceof Error ? error.message : String(error));
         if (error instanceof RetryLaterError) {
           await db.system(({ jobs: repo }) =>
             repo.retry(job.id, message, new Date(clock.now().getTime() + error.delaySeconds * 1000)),

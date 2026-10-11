@@ -32,7 +32,7 @@ import {
 import { ATTRIBUTES, displayValue, interpretRequirement } from '@lodgent/taxonomy';
 import type { Logger } from 'pino';
 import type { Signer } from '../infra/signing';
-import type { AgentCaller, AgentLog } from './agent-log';
+import { type AgentCaller, type AgentLog, redactForLog } from './agent-log';
 import type { CatalogService } from './catalog';
 import { dueNow, type OfferService, toOfferDto } from './offers';
 
@@ -527,7 +527,8 @@ export class AgentService {
         ratePlanId: finalQuote.ratePlanId,
         agentClientId: caller.partnerId,
         channel: caller.channel,
-        clientName: caller.clientName?.slice(0, 60) ?? null,
+        // Masked like on funnel events, so the per-agent funnel joins holds and events on the same label.
+        clientName: redactForLog(caller.clientName),
         arrival: finalQuote.arrival,
         departure: finalQuote.departure,
         adults: finalQuote.adults,

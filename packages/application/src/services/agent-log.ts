@@ -54,6 +54,8 @@ export class AgentLog {
       return await this.db.system(async ({ agentLog }) => {
         const queryId = await agentLog.insertQuery({
           ...query,
+          // Free text from the agent: masked like the other text fields (it could carry contact details).
+          destination: redactForLog(query.destination),
           agentClientId: caller.partnerId,
           channel: caller.channel,
           clientName: redactForLog(caller.clientName),
