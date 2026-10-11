@@ -11,6 +11,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1149.0",
+    "@aws-sdk/client-sesv2": "3.1149.0",
+    "@aws-sdk/client-sqs": "3.1149.0",
     "@lodgent/apaleo": "workspace:*",
     "@lodgent/core": "workspace:*",
     "@lodgent/db": "workspace:*",
@@ -18,10 +21,17 @@
     "@lodgent/payments": "workspace:*",
     "@lodgent/shared": "workspace:*",
     "@lodgent/taxonomy": "workspace:*",
+    "aws-jwt-verify": "5.2.1",
+    "jose": "6.2.12",
+    "nodemailer": "10.1.0",
+    "pino": "10.4.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "12.2.0",
     "@types/node": "^22.19.0",
+    "@types/nodemailer": "8.0.2",
+    "testcontainers": "12.2.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

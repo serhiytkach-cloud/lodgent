@@ -15,16 +15,18 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 ## Milestones
 
 ### M0: Foundation
-- [ ] pnpm workspaces + Turborepo, strict TypeScript, Biome lint/format, Vitest
-- [ ] docker-compose: Postgres 16 + pgvector, LocalStack, Mailpit; `.env.example`
-- [ ] GitHub Actions: lint, typecheck, test, build, `cdk synth`, secrets scan, dependency audit
-- [ ] CLAUDE.md, docs/ARCHITECTURE.md, PLAN.md, first ADRs
+- [x] pnpm workspaces + Turborepo, strict TypeScript, Biome lint/format, Vitest
+- [x] docker-compose: Postgres 16 + pgvector, LocalStack, Mailpit; `.env.example`
+- [x] GitHub Actions: lint, typecheck, test, build, `cdk synth`, secrets scan, dependency audit
+- [x] CLAUDE.md, docs/ARCHITECTURE.md, PLAN.md, first ADRs
 
 ### M1: Tenancy & auth
-- [ ] Organizations, properties, users, memberships (owner/admin/viewer), invitations
-- [ ] Auth behind an interface: Cognito (JWKS-verified tokens, hosted UI) and a dev provider
-- [ ] Tenancy enforced in the repository layer and by Postgres RLS; cross-tenant tests
-- [ ] Audit log for every hotel-side change
+- [x] Organizations, properties, users, memberships (owner/admin/viewer), invitations
+- [x] Auth behind an interface: Cognito (JWKS-verified tokens, hosted UI) and a dev provider
+- [x] Tenancy enforced in the repository layer and by Postgres RLS; cross-tenant tests
+- [x] Audit log for every hotel-side change
+- [x] Dashboard: sign-in (dev + Cognito PKCE), onboarding, properties, team/invitations, settings, audit log
+- [x] Worker: outbox dispatcher, Postgres/SQS job runners, local scheduler
 
 ### M2: Apaleo integration
 - [ ] OAuth 2.0 authorization-code flow, token refresh, KMS envelope-encrypted token storage

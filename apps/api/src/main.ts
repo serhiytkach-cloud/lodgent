@@ -1,5 +1,21 @@
+import { createContainer, loadConfig, loadDotEnv } from '@lodgent/application';
 import { buildApp } from './app';
 
-const app = await buildApp({ logLevel: process.env.LOG_LEVEL ?? 'info' });
-const port = Number(process.env.API_PORT ?? 4000);
-await app.listen({ port, host: '0.0.0.0' });
+loadDotEnv();
+const config = loadConfig();
+const container = createContainer(config, { name: 'api' });
+const { server } = await buildApp(container);
+
+await server.listen({ port: config.apiPort, host: '0.0.0.0' });
+
+let closing = false;
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, async () => {
+    if (closing) return;
+    closing = true;
+    server.log.info({ signal }, 'shutting down');
+    await server.close();
+    await container.close();
+    process.exit(0);
+  });
+}
