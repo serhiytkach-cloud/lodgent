@@ -61,7 +61,11 @@ export function buildOpenApi(routes: AnyRouteDef[], options: OpenApiOptions) {
         [String(route.status ?? (route.response === null ? 204 : 200))]: route.response
           ? {
               description: 'OK',
-              content: { 'application/json': { schema: toSchema(route.response, 'output') } },
+              content: {
+                [route.produces ?? 'application/json']: route.produces
+                  ? { schema: { type: 'string' } }
+                  : { schema: toSchema(route.response, 'output') },
+              },
             }
           : { description: 'No content' },
         default: { description: 'Error', content: { 'application/json': { schema: errorSchema } } },

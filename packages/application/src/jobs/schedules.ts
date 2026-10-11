@@ -53,6 +53,13 @@ export const SCHEDULES: Schedule[] = [
     job: { type: 'visibility.purge', payload: {} },
   },
   {
+    // Invoices last month's pay-at-hotel fees (idempotent per period) and re-checks open invoices.
+    name: 'billing-daily',
+    everyMinutes: 1440,
+    expression: 'cron(10 6 * * ? *)',
+    job: { type: 'billing.daily', payload: {} },
+  },
+  {
     name: 'offers-cleanup',
     everyMinutes: 60,
     expression: 'rate(1 hour)',

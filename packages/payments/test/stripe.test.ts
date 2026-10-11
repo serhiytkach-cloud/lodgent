@@ -175,6 +175,66 @@ describe('Stripe provider against the fake Stripe API (real SDK)', () => {
     expect(done).toMatchObject({ status: 'succeeded', paymentMethodId: expect.stringMatching(/^pm_/) });
   });
 
+  it('issues a platform fee invoice idempotently and reports payment through a webhook', async () => {
+    const customerId = await provider.createBillingCustomer({
+      name: 'Casa Azul Hotels',
+      email: 'billing@example.com',
+      metadata: { orgId: 'o1' },
+      idempotencyKey: 'customer:o1',
+    });
+    expect(customerId).toMatch(/^cus_/);
+    const input = {
+      customerId,
+      currency: 'EUR',
+      description: 'Lodgent booking fees, September 2026',
+      lines: [
+        { amount: 1_240, description: 'Casa Azul Lisboa: 3 stays' },
+        { amount: 560, description: 'Casa Azul Porto: 1 stay' },
+      ],
+      daysUntilDue: 14,
+      metadata: { feeInvoiceId: 'fi_1' },
+      idempotencyKey: 'invoice:fi_1',
+    };
+    const invoice = await provider.issueInvoice(input);
+    expect(invoice).toMatchObject({
+      status: 'open',
+      currency: 'EUR',
+      amountDue: 1_800,
+      number: expect.stringMatching(/^LODG-/),
+      hostedUrl: expect.stringContaining(`/_fake/invoices/${invoice.id}`),
+      metadata: { feeInvoiceId: 'fi_1' },
+    });
+    // A retry (e.g. after a crash) returns the same invoice and adds no lines.
+    const again = await provider.issueInvoice(input);
+    expect(again.id).toBe(invoice.id);
+    expect(again.amountDue).toBe(1_800);
+    // Invoicing happens on the platform account, never on a hotel's connected account.
+    expect(
+      fake.state.requests.filter((r) => r.url.startsWith('/v1/invoice')).every((r) => r.account === null),
+    ).toBe(true);
+
+    received.length = 0;
+    await fake.payInvoice(invoice.id);
+    await expect.poll(() => received.some((e) => e.type === 'invoice.updated')).toBe(true);
+    expect(received.find((e) => e.type === 'invoice.updated')).toMatchObject({
+      invoiceId: invoice.id,
+      metadata: { feeInvoiceId: 'fi_1' },
+    });
+    expect(await provider.getInvoice(invoice.id)).toMatchObject({ status: 'paid', amountPaid: 1_800 });
+  });
+
+  it('ignores invoice events from connected accounts (hotels billing their own customers)', () => {
+    const payload = JSON.stringify({
+      id: 'evt_2',
+      object: 'event',
+      type: 'invoice.paid',
+      account: 'acct_hotel',
+      data: { object: { id: 'in_hotel', object: 'invoice', metadata: {} } },
+    });
+    const header = StripePaymentProvider.signatureHeader(payload, SECRET);
+    expect(provider.parseWebhook(Buffer.from(payload), header)).toMatchObject({ type: 'ignored' });
+  });
+
   it('rejects webhooks with a bad signature and ignores unknown events', () => {
     const payload = JSON.stringify({
       id: 'evt_1',

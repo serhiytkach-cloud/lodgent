@@ -1,5 +1,7 @@
 import type { Tx } from '../client';
+import { billingRepo } from './billing';
 import { bookingRepo, feeLedgerRepo, holdRepo, paymentAccountRepo } from './bookings';
+import { funnelRepo } from './funnel';
 import { offerQuoteRepo, pmsConnectionRepo, policyRepo, ratePlanRepo, roomTypeRepo } from './pms';
 import { attributeAssignmentRepo, crawlRepo, descriptionSuggestionRepo, embeddingRepo } from './profile';
 import {
@@ -37,6 +39,8 @@ export function tenantRepos(tx: Tx, orgId: string) {
     fees: feeLedgerRepo(tx, orgId),
     paymentAccount: paymentAccountRepo(tx, orgId),
     visibility: visibilityRepo(tx, orgId),
+    billing: billingRepo(tx, orgId),
+    funnel: funnelRepo(tx, orgId),
   };
 }
 

@@ -9,6 +9,7 @@ import {
   pgEnum,
   pgTable,
   text,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agentChannel, agentClients } from './agents';
@@ -161,6 +162,8 @@ export const bookings = pgTable(
     confirmationNumber: text('confirmation_number'),
     pmsStatus: text('pms_status'),
     folioPaymentRecordedAt: tstz('folio_payment_recorded_at'),
+    /** When the payment was first seen authorized (or the card saved): the funnel's "paid" step. */
+    paymentAuthorizedAt: tstz('payment_authorized_at'),
     confirmedAt: tstz('confirmed_at'),
     cancelledAt: tstz('cancelled_at'),
     createdAt: createdAt(),
@@ -171,6 +174,45 @@ export const bookings = pgTable(
     index('bookings_status_idx').on(t.status, t.updatedAt),
     index('bookings_pms_reservation_idx').on(t.pmsReservationId),
   ],
+);
+
+export const feeInvoiceStatus = pgEnum('fee_invoice_status', [
+  'draft',
+  'open',
+  'paid',
+  'void',
+  'uncollectible',
+]);
+
+/**
+ * A monthly platform invoice to a hotel group for pay-at-hotel booking fees (Stripe Billing on the
+ * platform account). One per organization, period and currency; created as `draft` here first so
+ * a retried job issues the same Stripe invoice (idempotency keys derive from this row's id).
+ */
+export const feeInvoices = pgTable(
+  'fee_invoices',
+  {
+    id: id(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** Billing month, `YYYY-MM`: covers pay-at-hotel stays that ended by the end of it. */
+    period: text('period').notNull(),
+    currency: text('currency').notNull(),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
+    feeCount: integer('fee_count').notNull(),
+    status: feeInvoiceStatus('status').notNull().default('draft'),
+    providerInvoiceId: text('provider_invoice_id').unique(),
+    number: text('number'),
+    hostedUrl: text('hosted_url'),
+    pdfUrl: text('pdf_url'),
+    dueAt: tstz('due_at'),
+    issuedAt: tstz('issued_at'),
+    paidAt: tstz('paid_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('fee_invoices_period_idx').on(t.organizationId, t.period, t.currency)],
 );
 
 export const feeCollection = pgEnum('fee_collection', ['application_fee', 'invoice']);
@@ -200,10 +242,13 @@ export const feeLedger = pgTable(
     bookingTotalAmount: bigint('booking_total_amount', { mode: 'number' }).notNull(),
     amount: bigint('amount', { mode: 'number' }).notNull(),
     currency: text('currency').notNull(),
-    invoiceId: text('invoice_id'),
+    invoiceId: uuid('invoice_id').references(() => feeInvoices.id, { onDelete: 'set null' }),
     occurredAt: tstz('occurred_at').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('fee_ledger_org_idx').on(t.organizationId, t.occurredAt)],
+  (t) => [
+    index('fee_ledger_org_idx').on(t.organizationId, t.occurredAt),
+    index('fee_ledger_invoice_idx').on(t.invoiceId),
+  ],
 );

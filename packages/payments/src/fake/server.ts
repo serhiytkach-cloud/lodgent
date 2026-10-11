@@ -5,9 +5,10 @@ import qs from 'qs';
 /**
  * An in-memory stand-in for the Stripe API, driven by the real `stripe` SDK (pointed at it with
  * host/port). It covers Connect accounts and onboarding links, manual-capture PaymentIntents with
- * application fees, customers and SetupIntents, idempotency keys and signed webhooks. A browser-
- * facing `/_fake/confirm` endpoint plays the part of Stripe.js confirming a payment: it takes an
- * outcome ("succeed" or "decline"), never card data.
+ * application fees, customers and SetupIntents, platform invoices (Billing) with a hosted invoice
+ * page, idempotency keys and signed webhooks. A browser-facing `/_fake/confirm` endpoint plays the
+ * part of Stripe.js confirming a payment: it takes an outcome ("succeed" or "decline"), never card
+ * data.
  */
 
 export interface FakeStripeOptions {
@@ -345,8 +346,9 @@ export function createFakeStripe(options: FakeStripeOptions = {}) {
 
   app.post('/v1/customers', (req, reply) =>
     idempotent(req, reply, 'customers.create', () => {
+      // Customers live on a connected account (guests' saved cards) or on the platform (billing).
       const account = requireConnected(req);
-      if (!account)
+      if (!account && accountOf(req))
         return [400, { error: { type: 'invalid_request_error', message: 'Unknown connected account' } }];
       const body = req.body as Record<string, unknown>;
       const customer = {
@@ -355,7 +357,7 @@ export function createFakeStripe(options: FakeStripeOptions = {}) {
         email: body.email ?? null,
         name: body.name ?? null,
         metadata: body.metadata ?? {},
-        _account: account.id as string,
+        _account: account ? (account.id as string) : null,
       };
       state.objects.set(customer.id, customer);
       return [200, publicObject(customer)];
@@ -392,6 +394,188 @@ export function createFakeStripe(options: FakeStripeOptions = {}) {
     if (!authorize(req, reply)) return reply;
     const si = findOwned(req, (req.params as { id: string }).id);
     return si ? publicObject(si) : stripeError(reply, 404, 'No such setup_intent', 'resource_missing');
+  });
+
+  // ---- Billing (platform invoices) -----------------------------------------------------------
+  let invoiceCounter = 0;
+  const invalid = (message: string, status = 400): [number, unknown] => [
+    status,
+    { error: { type: 'invalid_request_error', message } },
+  ];
+  const recalc = (inv: Obj) => {
+    const lines = inv.lines as { data: { amount: number }[] };
+    const total = lines.data.reduce((sum, l) => sum + l.amount, 0);
+    Object.assign(inv, {
+      subtotal: total,
+      total,
+      amount_due: total,
+      amount_remaining: total - Number(inv.amount_paid),
+    });
+  };
+
+  app.post('/v1/invoices', (req, reply) =>
+    idempotent(req, reply, 'invoices.create', () => {
+      const body = req.body as Record<string, unknown>;
+      const customer = findOwned(req, String(body.customer ?? ''));
+      if (customer?.object !== 'customer') return invalid('No such customer', 404);
+      const invId = id('in');
+      const inv = {
+        id: invId,
+        object: 'invoice',
+        customer: customer.id,
+        currency: String(body.currency ?? 'eur'),
+        collection_method: body.collection_method ?? 'charge_automatically',
+        days_until_due: body.days_until_due !== undefined ? Number(body.days_until_due) : null,
+        auto_advance: body.auto_advance === 'true',
+        description: body.description ?? null,
+        metadata: body.metadata ?? {},
+        status: 'draft',
+        number: null,
+        lines: { object: 'list', data: [] as Obj[], has_more: false },
+        subtotal: 0,
+        total: 0,
+        amount_due: 0,
+        amount_paid: 0,
+        amount_remaining: 0,
+        hosted_invoice_url: null,
+        invoice_pdf: null,
+        due_date: null,
+        status_transitions: { finalized_at: null, paid_at: null, voided_at: null },
+        created: now(),
+        _account: accountOf(req),
+      };
+      state.objects.set(invId, inv);
+      return [200, publicObject(inv)];
+    }),
+  );
+
+  app.post('/v1/invoiceitems', (req, reply) =>
+    idempotent(req, reply, 'invoiceitems.create', () => {
+      const body = req.body as Record<string, unknown>;
+      const inv = findOwned(req, String(body.invoice ?? ''));
+      if (inv?.object !== 'invoice') return invalid('No such invoice', 404);
+      if (inv.status !== 'draft') return invalid('Invoice is not a draft');
+      const amount = Number(body.amount);
+      if (!Number.isInteger(amount)) return invalid('Invalid amount');
+      const item = {
+        id: id('ii'),
+        object: 'invoiceitem',
+        invoice: inv.id,
+        customer: body.customer,
+        amount,
+        currency: String(body.currency ?? inv.currency),
+        description: body.description ?? null,
+        _account: accountOf(req),
+      };
+      state.objects.set(item.id, item);
+      (inv.lines as { data: Obj[] }).data.push({
+        id: id('il'),
+        object: 'line_item',
+        amount,
+        currency: item.currency,
+        description: item.description,
+      });
+      recalc(inv);
+      return [200, publicObject(item)];
+    }),
+  );
+
+  app.get('/v1/invoices/:id', async (req, reply) => {
+    if (!authorize(req, reply)) return reply;
+    const inv = findOwned(req, (req.params as { id: string }).id);
+    return inv?.object === 'invoice'
+      ? publicObject(inv)
+      : stripeError(reply, 404, 'No such invoice', 'resource_missing');
+  });
+
+  app.post('/v1/invoices/:id/finalize', (req, reply) =>
+    idempotent(req, reply, 'invoices.finalize', async () => {
+      const inv = findOwned(req, (req.params as { id: string }).id);
+      if (inv?.object !== 'invoice') return invalid('No such invoice', 404);
+      if (inv.status !== 'draft') return invalid(`Invoice is already ${inv.status}`);
+      invoiceCounter++;
+      Object.assign(inv, {
+        status: 'open',
+        number: `LODG-${String(invoiceCounter).padStart(4, '0')}`,
+        hosted_invoice_url: `${publicUrl}/_fake/invoices/${inv.id}`,
+        invoice_pdf: `${publicUrl}/_fake/invoices/${inv.id}/pdf`,
+        due_date: inv.days_until_due !== null ? now() + Number(inv.days_until_due) * 86_400 : null,
+        status_transitions: { ...(inv.status_transitions as object), finalized_at: now() },
+      });
+      await emit('invoice.finalized', inv, inv._account);
+      return [200, publicObject(inv)];
+    }),
+  );
+
+  app.post('/v1/invoices/:id/send', (req, reply) =>
+    idempotent(req, reply, 'invoices.send', async () => {
+      const inv = findOwned(req, (req.params as { id: string }).id);
+      if (inv?.object !== 'invoice') return invalid('No such invoice', 404);
+      if (inv.status !== 'open') return invalid('Only open invoices can be sent');
+      await emit('invoice.sent', inv, inv._account);
+      return [200, publicObject(inv)];
+    }),
+  );
+
+  app.post('/v1/invoices/:id/void', (req, reply) =>
+    idempotent(req, reply, 'invoices.void', async () => {
+      const inv = findOwned(req, (req.params as { id: string }).id);
+      if (inv?.object !== 'invoice') return invalid('No such invoice', 404);
+      if (inv.status !== 'open') return invalid('Only open invoices can be voided');
+      Object.assign(inv, {
+        status: 'void',
+        status_transitions: { ...(inv.status_transitions as object), voided_at: now() },
+      });
+      await emit('invoice.voided', inv, inv._account);
+      return [200, publicObject(inv)];
+    }),
+  );
+
+  async function payInvoice(invoiceId: string): Promise<Obj | null> {
+    const inv = state.objects.get(invoiceId);
+    if (inv?.object !== 'invoice' || inv.status !== 'open') return null;
+    Object.assign(inv, {
+      status: 'paid',
+      amount_paid: inv.amount_due,
+      amount_remaining: 0,
+      status_transitions: { ...(inv.status_transitions as object), paid_at: now() },
+    });
+    await emit('invoice.paid', inv, inv._account);
+    return inv;
+  }
+
+  /** Simulated hosted invoice page (the hotel pays the platform's fee invoice here). */
+  app.get('/_fake/invoices/:id', async (req, reply) => {
+    const inv = state.objects.get((req.params as { id: string }).id);
+    if (inv?.object !== 'invoice') return reply.status(404).send('Unknown invoice');
+    const esc = (v: unknown) =>
+      String(v ?? '').replace(
+        /[&<>"]/g,
+        (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!,
+      );
+    const money = (n: number) => `${(n / 100).toFixed(2)} ${String(inv.currency).toUpperCase()}`;
+    const lines = (inv.lines as { data: { amount: number; description: string | null }[] }).data
+      .map(
+        (l) => `<tr><td>${esc(l.description)}</td><td style="text-align:right">${money(l.amount)}</td></tr>`,
+      )
+      .join('');
+    const action =
+      inv.status === 'open'
+        ? `<form method="post" action="/_fake/invoices/${inv.id}/pay"><button id="pay" type="submit">Pay invoice (test)</button></form>`
+        : `<p id="status">Status: ${esc(inv.status)}</p>`;
+    return reply
+      .type('text/html')
+      .send(`<!doctype html><html><body style="font-family:system-ui;max-width:560px;margin:60px auto">
+<h1>Invoice ${esc(inv.number)}</h1><p>${esc(inv.description)}</p>
+<table style="width:100%">${lines}<tr><th style="text-align:left">Total</th><th style="text-align:right">${money(Number(inv.amount_due))}</th></tr></table>
+${action}</body></html>`);
+  });
+
+  app.post('/_fake/invoices/:id/pay', async (req, reply) => {
+    const invoiceId = (req.params as { id: string }).id;
+    const inv = await payInvoice(invoiceId);
+    if (!inv) return reply.status(400).send('Invoice cannot be paid');
+    return reply.redirect(`/_fake/invoices/${invoiceId}`, 303);
   });
 
   // ---- Simulated Stripe.js -------------------------------------------------------------------
@@ -494,6 +678,8 @@ export function createFakeStripe(options: FakeStripeOptions = {}) {
       });
       return res.json() as Record<string, unknown>;
     },
+    /** Pays an open platform invoice, as the hotel would on the hosted invoice page (tests). */
+    payInvoice,
     /** Marks a connected account as fully onboarded (tests). */
     async completeOnboarding(accountId: string) {
       await app.inject({ method: 'GET', url: `/_fake/onboarding/${accountId}/complete?return_url=/` });

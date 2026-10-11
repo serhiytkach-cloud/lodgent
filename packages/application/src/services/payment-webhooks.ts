@@ -1,6 +1,7 @@
 import type { Clock, JobQueue, PaymentProvider } from '@lodgent/core';
 import type { Database } from '@lodgent/db';
 import type { Logger } from 'pino';
+import type { BillingService } from './billing';
 import type { CheckoutService } from './checkout';
 
 /**
@@ -16,12 +17,13 @@ export class PaymentWebhookService {
       payments: PaymentProvider;
       queue: JobQueue;
       checkout: CheckoutService;
+      billing: BillingService;
       logger: Logger;
     },
   ) {}
 
   async handle(rawBody: Buffer, signature: string): Promise<{ received: boolean; duplicate?: boolean }> {
-    const { db, payments, queue, checkout, logger } = this.deps;
+    const { db, payments, queue, checkout, billing, logger } = this.deps;
     const event = payments.parseWebhook(rawBody, signature);
     const type = event.type === 'ignored' ? event.eventType : event.type;
     const fresh = await db.system(({ pms }) => pms.recordWebhookEvent('stripe', event.id, type));
@@ -33,6 +35,17 @@ export class PaymentWebhookService {
         payload: { accountId: event.accountId },
         dedupeKey: `stripe:${event.id}`,
       });
+    } else if (event.type === 'invoice.updated') {
+      const target = await billing.resolveInvoiceEvent(event);
+      if (target) {
+        await queue.enqueue({
+          type: 'billing.invoice-sync',
+          payload: { ...target, providerInvoiceId: event.invoiceId },
+          dedupeKey: `stripe:${event.id}`,
+        });
+      } else {
+        logger.info({ eventId: event.id, type }, 'invoice event for no known fee invoice');
+      }
     } else if (event.type === 'payment_intent.updated' || event.type === 'setup_intent.updated') {
       const target = await checkout.handlePaymentEvent(event);
       if (target) {

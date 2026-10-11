@@ -48,6 +48,8 @@ export interface RouteDef<M extends AuthMode, P, Q, B, R> {
   body?: z.ZodType<B>;
   /** `null` for 204 No Content. Responses are parsed with this schema, which strips unknown keys. */
   response: z.ZodType<R> | null;
+  /** Response media type when not JSON (e.g. CSV downloads, whose handler returns the text). */
+  produces?: 'text/csv';
   status?: number;
   /** Requests per minute per caller; defaults depend on the auth mode. */
   rateLimitPerMinute?: number;
@@ -128,6 +130,7 @@ export class Router {
           );
           throw new Error(`Response for ${def.operationId} did not match its schema`);
         }
+        if (def.produces) reply.type(`${def.produces}; charset=utf-8`);
         return reply.status(def.status ?? 200).send(output.data);
       },
     });

@@ -12,6 +12,7 @@ import { Router } from './http/router';
 import { registerMcpEndpoint } from './mcp/server';
 import { registerAccountRoutes } from './routes/account';
 import { registerAgentRoutes } from './routes/agent';
+import { registerBookingRoutes } from './routes/bookings';
 import { registerCheckoutRoutes } from './routes/checkout';
 import { registerIntegrationRoutes } from './routes/integrations';
 import { registerOrganizationRoutes } from './routes/organizations';
@@ -93,6 +94,7 @@ export async function buildApp(container: Container): Promise<App> {
   registerAgentRoutes(router, container);
   registerCheckoutRoutes(router, container);
   registerVisibilityRoutes(router, container);
+  registerBookingRoutes(router, container);
   registerMcpEndpoint(server, container);
 
   server.get('/healthz', async () => ({ ok: true, service: `${BRAND.slug}-api` }));

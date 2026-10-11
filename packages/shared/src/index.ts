@@ -1,4 +1,5 @@
 export * from './api/agent';
+export * from './api/bookings';
 export * from './api/checkout';
 export * from './api/dashboard';
 export * from './api/offers';

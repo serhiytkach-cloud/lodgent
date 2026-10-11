@@ -42,6 +42,8 @@ import { AgentService } from './services/agent';
 import { AgentClientService } from './services/agent-clients';
 import { AgentLog } from './services/agent-log';
 import { AuditService } from './services/audit';
+import { BillingService } from './services/billing';
+import { BookingsService } from './services/bookings';
 import { CatalogService } from './services/catalog';
 import { CheckoutService } from './services/checkout';
 import { InventoryService } from './services/inventory';
@@ -121,10 +123,24 @@ function createServices(config: AppConfig, a: Adapters) {
     simulatorUrl: config.stripe.apiBaseUrl ?? null,
     piiRetentionDays: config.business.piiRetentionDays,
   });
+  const billing = new BillingService({
+    db: a.db,
+    clock: a.clock,
+    payments: a.payments,
+    queue: a.queue,
+    logger: a.logger,
+  });
   return {
     pmsConnections,
     catalog,
     offers,
+    billing,
+    bookings: new BookingsService({
+      db: a.db,
+      clock: a.clock,
+      pmsReservationUrlTemplate: config.apaleo.reservationUrlTemplate,
+      paymentsDashboardUrl: config.stripe.dashboardUrl,
+    }),
     paymentAccounts: new PaymentAccountService({
       db: a.db,
       clock: a.clock,
@@ -140,6 +156,7 @@ function createServices(config: AppConfig, a: Adapters) {
       payments: a.payments,
       queue: a.queue,
       checkout,
+      billing,
       logger: a.logger,
     }),
     visibility: new VisibilityService({

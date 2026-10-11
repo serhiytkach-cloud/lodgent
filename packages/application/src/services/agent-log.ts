@@ -48,7 +48,7 @@ export class AgentLog {
   async record(
     caller: AgentCaller,
     query: QueryFields,
-    events: Omit<NewAgentEvent, 'queryId' | 'agentClientId' | 'channel'>[] = [],
+    events: Omit<NewAgentEvent, 'queryId' | 'agentClientId' | 'channel' | 'clientName'>[] = [],
   ): Promise<string | null> {
     try {
       return await this.db.system(async ({ agentLog }) => {
@@ -62,7 +62,13 @@ export class AgentLog {
           utmCampaign: redactForLog(caller.utm.campaign),
         });
         await agentLog.insertEvents(
-          events.map((e) => ({ ...e, queryId, agentClientId: caller.partnerId, channel: caller.channel })),
+          events.map((e) => ({
+            ...e,
+            queryId,
+            agentClientId: caller.partnerId,
+            channel: caller.channel,
+            clientName: redactForLog(caller.clientName),
+          })),
         );
         return queryId;
       });

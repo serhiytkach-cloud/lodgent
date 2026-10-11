@@ -63,6 +63,8 @@ const EnvSchema = z.object({
   APALEO_SCOPES: optionalString,
   /** Channel Apaleo offers and bookings use. Rate plans must be distributed on it. */
   APALEO_CHANNEL_CODE: z.enum(['Ibe', 'Direct']).default('Ibe'),
+  /** Deep link to a reservation in the Apaleo app; `{propertyId}` and `{reservationId}` are replaced. */
+  APALEO_RESERVATION_URL_TEMPLATE: optionalString,
 
   STRIPE_SECRET_KEY: z.string().default(DEV_SECRETS.stripeSecretKey),
   STRIPE_PUBLISHABLE_KEY: z.string().default(DEV_SECRETS.stripePublishableKey),
@@ -128,12 +130,15 @@ export interface AppConfig {
     redirectUri: string;
     scopes: string[] | null;
     channelCode: 'Ibe' | 'Direct';
+    reservationUrlTemplate: string;
   };
   stripe: {
     secretKey: string;
     publishableKey: string;
     webhookSecrets: string[];
     apiBaseUrl?: string;
+    /** The hotel's own Stripe Dashboard (direct charges live there); null with the local fake. */
+    dashboardUrl: string | null;
   };
   llm: {
     anthropic?: { apiKey: string; model: string };
@@ -185,6 +190,10 @@ export function loadConfig(source: Record<string, string | undefined> = process.
   const e = parsed.data;
   const isProduction = e.APP_ENV === 'production';
 
+  // With the development placeholder key, talk to the local fake Stripe; a real key talks to Stripe.
+  const stripeApiBaseUrl =
+    e.STRIPE_API_BASE_URL ??
+    (e.STRIPE_SECRET_KEY === DEV_SECRETS.stripeSecretKey ? 'http://localhost:4020' : undefined);
   const config: AppConfig = {
     env: e.APP_ENV,
     isProduction,
@@ -226,6 +235,11 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       redirectUri: `${stripSlash(e.API_BASE_URL)}/v1/integrations/apaleo/callback`,
       scopes: e.APALEO_SCOPES ? e.APALEO_SCOPES.split(/\s+/).filter(Boolean) : null,
       channelCode: e.APALEO_CHANNEL_CODE,
+      reservationUrlTemplate:
+        e.APALEO_RESERVATION_URL_TEMPLATE ??
+        (/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(e.APALEO_API_URL)
+          ? `${stripSlash(e.APALEO_API_URL)}/app/{propertyId}/reservations/{reservationId}`
+          : 'https://app.apaleo.com/{propertyId}/reservations/{reservationId}'),
     },
     stripe: {
       secretKey: e.STRIPE_SECRET_KEY,
@@ -234,10 +248,10 @@ export function loadConfig(source: Record<string, string | undefined> = process.
         e.STRIPE_WEBHOOK_SECRET,
         ...(e.STRIPE_CONNECT_WEBHOOK_SECRET ? [e.STRIPE_CONNECT_WEBHOOK_SECRET] : []),
       ],
-      // With the development placeholder key, talk to the local fake Stripe; a real key talks to Stripe.
-      apiBaseUrl:
-        e.STRIPE_API_BASE_URL ??
-        (e.STRIPE_SECRET_KEY === DEV_SECRETS.stripeSecretKey ? 'http://localhost:4020' : undefined),
+      apiBaseUrl: stripeApiBaseUrl,
+      dashboardUrl: stripeApiBaseUrl
+        ? null
+        : `https://dashboard.stripe.com${e.STRIPE_SECRET_KEY.startsWith('sk_test_') ? '/test' : ''}`,
     },
     llm: {
       anthropic: e.ANTHROPIC_API_KEY ? { apiKey: e.ANTHROPIC_API_KEY, model: e.ANTHROPIC_MODEL } : undefined,

@@ -54,6 +54,23 @@ export interface SetupIntentInfo {
   lastError: string | null;
 }
 
+export type BillingInvoiceStatus = 'draft' | 'open' | 'paid' | 'void' | 'uncollectible';
+
+/** A platform invoice to a hotel group (Stripe Billing on the platform account). */
+export interface BillingInvoiceInfo {
+  id: string;
+  number: string | null;
+  status: BillingInvoiceStatus;
+  currency: string;
+  amountDue: number;
+  amountPaid: number;
+  hostedUrl: string | null;
+  pdfUrl: string | null;
+  dueAt: Date | null;
+  paidAt: Date | null;
+  metadata: Record<string, string>;
+}
+
 /** A provider webhook event, verified and reduced to what we act on. */
 export type PaymentEvent =
   | {
@@ -73,6 +90,7 @@ export type PaymentEvent =
       metadata: Record<string, string>;
     }
   | { id: string; type: 'account.updated'; accountId: string }
+  | { id: string; type: 'invoice.updated'; invoiceId: string; metadata: Record<string, string> }
   | { id: string; type: 'ignored'; eventType: string };
 
 export interface PaymentProvider {
@@ -113,6 +131,29 @@ export interface PaymentProvider {
     idempotencyKey: string;
   }): Promise<SetupIntentInfo>;
   getSetupIntent(accountId: string, id: string): Promise<SetupIntentInfo>;
+
+  // ---- Billing: the platform invoices hotel groups for pay-at-hotel fees -------------------
+  /** A customer on the platform account for the hotel group (created once, then reused). */
+  createBillingCustomer(input: {
+    name: string;
+    email: string | null;
+    metadata: Record<string, string>;
+    idempotencyKey: string;
+  }): Promise<string>;
+  /**
+   * Creates, finalizes and emails an invoice with the given lines, payable on the hosted invoice
+   * page. Every step is idempotent on `idempotencyKey`, so a retry continues where it stopped.
+   */
+  issueInvoice(input: {
+    customerId: string;
+    currency: string;
+    description: string;
+    lines: { amount: number; description: string }[];
+    daysUntilDue: number;
+    metadata: Record<string, string>;
+    idempotencyKey: string;
+  }): Promise<BillingInvoiceInfo>;
+  getInvoice(id: string): Promise<BillingInvoiceInfo>;
 
   /** Verifies the signature over the exact request bytes. Throws on a bad signature. */
   parseWebhook(rawBody: Buffer, signature: string): PaymentEvent;

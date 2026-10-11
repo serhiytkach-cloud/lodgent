@@ -1,6 +1,7 @@
-import { and, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, ilike, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Tx } from '../client';
-import { bookings, feeLedger, holds, paymentAccounts } from '../schema';
+import { agentClients, bookings, feeLedger, holds, paymentAccounts, properties } from '../schema';
+import type { OfferQuoteDetails } from '../schema/pms';
 
 export type HoldRow = typeof holds.$inferSelect;
 export type NewHold = Omit<typeof holds.$inferInsert, 'organizationId' | 'id' | 'createdAt' | 'updatedAt'>;
@@ -13,6 +14,33 @@ export type NewBooking = Omit<
 >;
 export type BookingStatus = BookingRow['status'];
 export type FeeLedgerRow = typeof feeLedger.$inferSelect;
+
+export interface BookingSearch {
+  id?: string;
+  propertyId?: string;
+  statuses?: BookingStatus[];
+  createdFrom?: Date;
+  createdTo?: Date;
+  /** Booking reference, confirmation number or guest surname (substring). */
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface BookingListRow {
+  booking: BookingRow;
+  propertyName: string;
+  pmsPropertyId: string | null;
+  timeZone: string;
+  offer: OfferQuoteDetails;
+  clientName: string | null;
+  partnerName: string | null;
+  feeStatus: FeeLedgerRow['status'] | null;
+  feeCollection: FeeLedgerRow['collection'] | null;
+  feeInvoiceId: string | null;
+}
+
+export const escapeLike = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export function holdRepo(tx: Tx, orgId: string) {
   const own = eq(holds.organizationId, orgId);
@@ -168,7 +196,11 @@ export function bookingRepo(tx: Tx, orgId: string) {
       const stale = new Date(now.getTime() - leaseMs);
       const [row] = await tx
         .update(bookings)
-        .set({ status: 'reserving', updatedAt: now })
+        .set({
+          status: 'reserving',
+          updatedAt: now,
+          paymentAuthorizedAt: sql`coalesce(${bookings.paymentAuthorizedAt}, ${now})`,
+        })
         .where(
           and(
             own,
@@ -207,6 +239,48 @@ export function bookingRepo(tx: Tx, orgId: string) {
         .where(and(own, options.propertyId ? eq(bookings.propertyId, options.propertyId) : undefined))
         .orderBy(desc(bookings.createdAt))
         .limit(options.limit ?? 100);
+    },
+    /** Bookings with what the dashboard shows alongside them (property, offer snapshot, agent, fee). */
+    async search(filters: BookingSearch): Promise<{ rows: BookingListRow[]; total: number }> {
+      const where = and(
+        own,
+        filters.id ? eq(bookings.id, filters.id) : undefined,
+        filters.propertyId ? eq(bookings.propertyId, filters.propertyId) : undefined,
+        filters.statuses?.length ? inArray(bookings.status, filters.statuses) : undefined,
+        filters.createdFrom ? gte(bookings.createdAt, filters.createdFrom) : undefined,
+        filters.createdTo ? lt(bookings.createdAt, filters.createdTo) : undefined,
+        filters.q
+          ? or(
+              ilike(bookings.reference, `%${escapeLike(filters.q)}%`),
+              ilike(bookings.confirmationNumber, `%${escapeLike(filters.q)}%`),
+              ilike(bookings.guestLastName, `%${escapeLike(filters.q)}%`),
+            )
+          : undefined,
+      );
+      const [count] = await tx.select({ n: sql<number>`count(*)::int` }).from(bookings).where(where);
+      const rows = await tx
+        .select({
+          booking: bookings,
+          propertyName: properties.name,
+          pmsPropertyId: properties.pmsPropertyId,
+          timeZone: properties.timeZone,
+          offer: holds.offer,
+          clientName: holds.clientName,
+          partnerName: agentClients.name,
+          feeStatus: feeLedger.status,
+          feeCollection: feeLedger.collection,
+          feeInvoiceId: feeLedger.invoiceId,
+        })
+        .from(bookings)
+        .innerJoin(properties, eq(properties.id, bookings.propertyId))
+        .innerJoin(holds, eq(holds.id, bookings.holdId))
+        .leftJoin(agentClients, eq(agentClients.id, bookings.agentClientId))
+        .leftJoin(feeLedger, eq(feeLedger.bookingId, bookings.id))
+        .where(where)
+        .orderBy(desc(bookings.createdAt), desc(bookings.id))
+        .limit(filters.limit ?? 50)
+        .offset(filters.offset ?? 0);
+      return { rows, total: count?.n ?? 0 };
     },
   };
 }

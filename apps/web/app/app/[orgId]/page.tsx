@@ -1,3 +1,4 @@
+import type { FunnelDto, PaymentAccountDto } from '@lodgent/shared';
 import { CheckCircle2, Circle } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,9 +8,11 @@ import type { Organization, Property } from '@/lib/types';
 
 export default async function OverviewPage({ params }: { params: Promise<{ orgId: string }> }) {
   const { orgId } = await params;
-  const [org, { properties }] = await Promise.all([
+  const [org, { properties }, payments, funnel] = await Promise.all([
     api<Organization>(`/v1/orgs/${orgId}`),
     api<{ properties: Property[] }>(`/v1/orgs/${orgId}/properties`),
+    api<PaymentAccountDto>(`/v1/orgs/${orgId}/payments`),
+    api<FunnelDto>(`/v1/orgs/${orgId}/funnel?days=30`),
   ]);
   const published = properties.filter((p) => p.status === 'published').length;
   const steps = [
@@ -18,7 +21,11 @@ export default async function OverviewPage({ params }: { params: Promise<{ orgId
       label: 'Connect Apaleo and import your properties',
       href: `/app/${orgId}/settings/connections`,
     },
-    { done: false, label: 'Connect Stripe to take payments', href: `/app/${orgId}/settings/connections` },
+    {
+      done: payments.status === 'active',
+      label: 'Connect Stripe to take payments',
+      href: `/app/${orgId}/settings/connections`,
+    },
     {
       done: published > 0,
       label: 'Review your attribute profile and publish',
@@ -28,10 +35,19 @@ export default async function OverviewPage({ params }: { params: Promise<{ orgId
   return (
     <>
       <PageHeader title={org.name} description="How AI agents find, quote and book your hotels." />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Stat label="Properties" value={properties.length} />
-        <Stat label="Published to agents" value={published} />
-        <Stat label="Your role" value={<span className="capitalize">{org.role}</span>} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Published to agents" value={`${published} of ${properties.length}`} hint="Properties" />
+        <Stat label="Agent searches" value={funnel.totals.searches} hint="You appeared in, last 30 days" />
+        <Stat label="Holds" value={funnel.totals.holds} hint="Rooms held by agents, last 30 days" />
+        <Stat
+          label="Reservations"
+          value={
+            <Link href={`/app/${orgId}/bookings`} className="hover:underline">
+              {funnel.totals.reservations}
+            </Link>
+          }
+          hint="Booked via agents, last 30 days"
+        />
       </div>
       <Card className="mt-6">
         <CardHeader>

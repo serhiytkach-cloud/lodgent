@@ -73,6 +73,8 @@ export const agentEvents = pgTable(
     queryId: uuid('query_id').references(() => agentQueries.id, { onDelete: 'set null' }),
     agentClientId: uuid('agent_client_id').references(() => agentClients.id, { onDelete: 'set null' }),
     channel: agentChannel('channel').notNull(),
+    /** The calling app's self-reported name (MCP client info), for the per-agent funnel. */
+    clientName: text('client_name'),
     kind: agentEventKind('kind').notNull(),
     rank: integer('rank'),
     createdAt: createdAt(),

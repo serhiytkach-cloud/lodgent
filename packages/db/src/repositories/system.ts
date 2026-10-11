@@ -1,5 +1,6 @@
 import type { Tx } from '../client';
 import { agentClientRepo, agentLogRepo } from './agents';
+import { billingSystemRepo } from './billing';
 import { bookingSystemRepo, holdSystemRepo } from './bookings';
 import { catalogRepo } from './catalog';
 import { identityRepo } from './identity';
@@ -23,6 +24,7 @@ export function systemRepos(tx: Tx) {
     outbox: outboxDispatchRepo(tx),
     jobs: jobRepo(tx),
     visibility: visibilitySystemRepo(tx),
+    billing: billingSystemRepo(tx),
   };
 }
 

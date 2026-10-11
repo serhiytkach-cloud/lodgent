@@ -2,8 +2,11 @@ export { sql } from 'drizzle-orm';
 export { Database, type DatabaseOptions, type Orm, type Tx } from './client';
 export { migrationsFolder, runMigrations } from './migrate';
 export type { AgentClientRow, NewAgentEvent, NewAgentQuery } from './repositories/agents';
+export type { FeeInvoiceRow, FeeInvoiceStatus, FeeLine } from './repositories/billing';
 export type {
+  BookingListRow,
   BookingRow,
+  BookingSearch,
   BookingStatus,
   FeeLedgerRow,
   HoldRow,
@@ -13,6 +16,7 @@ export type {
   PaymentAccountRow,
 } from './repositories/bookings';
 export type { CatalogProperty } from './repositories/catalog';
+export type { AgentKey, FunnelBookingCount, FunnelEventCount, FunnelWindow } from './repositories/funnel';
 export type {
   NewOfferQuote,
   OfferQuoteRow,

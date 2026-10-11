@@ -84,6 +84,26 @@ export function createJobHandlers(container: Container): Record<string, JobHandl
     'visibility.purge': async () => {
       await services.visibility.purgeRawAnswers();
     },
+    'billing.daily': async (_payload, ctx) => {
+      const result = await services.billing.runDaily();
+      if (result.orgs + result.synced > 0) ctx.logger.info(result, 'billing run');
+    },
+    'billing.invoice-org': async (payload) => {
+      const { orgId, period, departedBefore } = z
+        .object({
+          orgId: z.uuid(),
+          period: z.string().regex(/^\d{4}-\d{2}$/),
+          departedBefore: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        })
+        .parse(payload);
+      await services.billing.invoiceOrg(orgId, period, departedBefore);
+    },
+    'billing.invoice-sync': async (payload) => {
+      const { orgId, feeInvoiceId, providerInvoiceId } = z
+        .object({ orgId: z.uuid(), feeInvoiceId: z.uuid(), providerInvoiceId: z.string().optional() })
+        .parse(payload);
+      await services.billing.syncInvoice(orgId, feeInvoiceId, providerInvoiceId);
+    },
     'privacy.retention': async (_payload, ctx) => {
       const redacted = await services.checkout.redactExpiredGuestData();
       if (redacted > 0) ctx.logger.info({ redacted }, 'guest data redacted');

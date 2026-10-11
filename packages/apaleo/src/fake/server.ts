@@ -695,6 +695,39 @@ export function createFakeApaleo(options: FakeApaleoOptions = {}) {
     if (!site || !page) return reply.status(404).type('text/html').send('<h1>Not found</h1>');
     return reply.type('text/html; charset=utf-8').send(renderSitePage(site, page));
   });
+  /** Stand-in for the Apaleo app's reservation screen (the dashboard deep-links here locally). */
+  app.get('/app/:propertyId/reservations/:reservationId', async (req, reply) => {
+    const { propertyId, reservationId } = req.params as { propertyId: string; reservationId: string };
+    const r = state.reservations.get(reservationId);
+    if (!r || r.propertyId !== propertyId)
+      return reply.status(404).type('text/html').send('<h1>Not found</h1>');
+    const esc = (v: unknown) =>
+      String(v ?? '').replace(
+        /[&<>"]/g,
+        (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!,
+      );
+    const guest = r.primaryGuest as { firstName?: string; lastName?: string };
+    const rows: [string, unknown][] = [
+      ['Status', r.status],
+      ['Guest', `${guest.firstName ?? ''} ${guest.lastName ?? ''}`],
+      ['Stay', `${r.arrival} → ${r.departure}`],
+      ['Rate plan', r.ratePlanId],
+      ['Guarantee', r.guarantee],
+      ['External code', r.externalCode],
+      ['Comment', r.comment],
+      [
+        'Payments',
+        r.payments.map((p) => `${(p.amount.amount / 100).toFixed(2)} ${p.amount.currency}`).join(', '),
+      ],
+    ];
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(`<!doctype html><html><body style="font-family:system-ui;max-width:640px;margin:40px auto">
+<p style="color:#666">Fake Apaleo (local development)</p><h1>Reservation ${esc(r.id)}</h1>
+<table>${rows.map(([k, v]) => `<tr><th style="text-align:left;padding-right:16px">${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
+</body></html>`);
+  });
+
   app.get('/sites/:site', async (req, reply) =>
     reply.redirect(`/sites/${(req.params as { site: string }).site}/`),
   );

@@ -1,4 +1,5 @@
 import {
+  type BillingInvoiceInfo,
   type ConnectedAccount,
   type PaymentEvent,
   type PaymentIntentInfo,
@@ -53,6 +54,25 @@ function toSetupIntent(si: Stripe.SetupIntent): SetupIntentInfo {
     customerId: id(si.customer),
     metadata: { ...(si.metadata ?? {}) },
     lastError: si.last_setup_error?.message ?? null,
+  };
+}
+
+function toInvoice(inv: Stripe.Invoice): BillingInvoiceInfo {
+  const known = ['draft', 'open', 'paid', 'void', 'uncollectible'] as const;
+  const status = known.find((k) => k === inv.status) ?? 'draft';
+  const paidAt = inv.status_transitions?.paid_at;
+  return {
+    id: inv.id ?? '',
+    number: inv.number ?? null,
+    status,
+    currency: inv.currency.toUpperCase(),
+    amountDue: inv.amount_due,
+    amountPaid: inv.amount_paid,
+    hostedUrl: inv.hosted_invoice_url ?? null,
+    pdfUrl: inv.invoice_pdf ?? null,
+    dueAt: inv.due_date ? new Date(inv.due_date * 1000) : null,
+    paidAt: paidAt ? new Date(paidAt * 1000) : null,
+    metadata: { ...(inv.metadata ?? {}) },
   };
 }
 
@@ -220,6 +240,68 @@ export class StripePaymentProvider implements PaymentProvider {
     );
   }
 
+  // ---- Billing (platform account) ----------------------------------------------------------
+
+  async createBillingCustomer(input: Parameters<PaymentProvider['createBillingCustomer']>[0]) {
+    const customer = await this.call('billing customer creation', () =>
+      this.stripe.customers.create(
+        { name: input.name, ...(input.email ? { email: input.email } : {}), metadata: input.metadata },
+        { idempotencyKey: input.idempotencyKey },
+      ),
+    );
+    return customer.id;
+  }
+
+  async issueInvoice(input: Parameters<PaymentProvider['issueInvoice']>[0]) {
+    const key = input.idempotencyKey;
+    const currency = input.currency.toLowerCase();
+    let invoice = await this.call('invoice creation', () =>
+      this.stripe.invoices.create(
+        {
+          customer: input.customerId,
+          currency,
+          collection_method: 'send_invoice',
+          days_until_due: input.daysUntilDue,
+          auto_advance: false,
+          pending_invoice_items_behavior: 'exclude',
+          description: input.description,
+          metadata: input.metadata,
+        },
+        { idempotencyKey: `${key}:create` },
+      ),
+    );
+    const invoiceId = invoice.id!;
+    if (invoice.status === 'draft') {
+      for (const [i, line] of input.lines.entries()) {
+        await this.call('invoice line creation', () =>
+          this.stripe.invoiceItems.create(
+            {
+              customer: input.customerId,
+              invoice: invoiceId,
+              amount: line.amount,
+              currency,
+              description: line.description,
+            },
+            { idempotencyKey: `${key}:line:${i}` },
+          ),
+        );
+      }
+      invoice = await this.call('invoice finalization', () =>
+        this.stripe.invoices.finalizeInvoice(invoiceId, {}, { idempotencyKey: `${key}:finalize` }),
+      );
+    }
+    if (invoice.status === 'open') {
+      invoice = await this.call('invoice sending', () =>
+        this.stripe.invoices.sendInvoice(invoiceId, {}, { idempotencyKey: `${key}:send` }),
+      );
+    }
+    return toInvoice(invoice);
+  }
+
+  async getInvoice(id: string) {
+    return toInvoice(await this.call('invoice lookup', () => this.stripe.invoices.retrieve(id)));
+  }
+
   parseWebhook(rawBody: Buffer, signature: string): PaymentEvent {
     let event: Stripe.Event | null = null;
     for (const secret of this.webhookSecrets) {
@@ -252,6 +334,17 @@ export class StripePaymentProvider implements PaymentProvider {
         setupIntentId: si.id,
         status: si.status as SetupIntentInfo['status'],
         metadata: { ...(si.metadata ?? {}) },
+      };
+    }
+    // Platform invoices only: hotels' own Stripe Billing invoices arrive on the Connect endpoint
+    // with an `account` and are none of our business.
+    if (event.type.startsWith('invoice.') && !accountId) {
+      const inv = event.data.object as Stripe.Invoice;
+      return {
+        id: event.id,
+        type: 'invoice.updated',
+        invoiceId: inv.id ?? '',
+        metadata: { ...(inv.metadata ?? {}) },
       };
     }
     if (event.type === 'account.updated') {
