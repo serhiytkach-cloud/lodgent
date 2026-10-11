@@ -1,6 +1,7 @@
 import type { Tx } from '../client';
 import { agentClientRepo } from './agents';
 import { identityRepo } from './identity';
+import { pmsSystemRepo } from './pms';
 import { jobRepo, outboxDispatchRepo } from './queue';
 
 /** Repositories for explicitly cross-tenant work. */
@@ -9,6 +10,7 @@ export function systemRepos(tx: Tx) {
     tx,
     identity: identityRepo(tx),
     agentClients: agentClientRepo(tx),
+    pms: pmsSystemRepo(tx),
     outbox: outboxDispatchRepo(tx),
     jobs: jobRepo(tx),
   };

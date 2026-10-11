@@ -15,7 +15,20 @@ export interface Schedule {
   job: { type: string; payload: Record<string, unknown> };
 }
 
-export const SCHEDULES: Schedule[] = [];
+export const SCHEDULES: Schedule[] = [
+  {
+    name: 'pms-sync-all',
+    everyMinutes: 360,
+    expression: 'rate(6 hours)',
+    job: { type: 'pms.sync-all', payload: {} },
+  },
+  {
+    name: 'offers-cleanup',
+    everyMinutes: 60,
+    expression: 'rate(1 hour)',
+    job: { type: 'offers.cleanup', payload: {} },
+  },
+];
 
 /** Enqueues due schedules. Dedupe keys make concurrent workers enqueue each slot only once. */
 export class LocalScheduler {

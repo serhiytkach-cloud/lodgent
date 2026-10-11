@@ -1,5 +1,13 @@
 export { Database, type DatabaseOptions, type Orm, type Tx } from './client';
 export { migrationsFolder, runMigrations } from './migrate';
+export type {
+  NewOfferQuote,
+  OfferQuoteRow,
+  PmsConnectionRow,
+  PolicyRow,
+  RatePlanRow,
+  RoomTypeRow,
+} from './repositories/pms';
 export type { JobRow, OutboxRow } from './repositories/queue';
 export type { SystemRepos } from './repositories/system';
 export type {
@@ -13,3 +21,4 @@ export type {
 } from './repositories/tenancy';
 export type { TenantRepos } from './repositories/tenant';
 export * as schema from './schema';
+export type { OfferQuoteDetails } from './schema/pms';

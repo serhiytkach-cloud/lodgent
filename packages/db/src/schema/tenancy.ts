@@ -111,6 +111,8 @@ export const properties = pgTable(
     photos: jsonb('photos').$type<{ url: string; caption?: string }[]>().notNull().default([]),
     pmsConnectionId: uuid('pms_connection_id'),
     pmsPropertyId: text('pms_property_id'),
+    /** Last values imported from the PMS; fields still equal to these are refreshed on sync. */
+    pmsSnapshot: jsonb('pms_snapshot').$type<Record<string, unknown>>(),
     publishedAt: tstz('published_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

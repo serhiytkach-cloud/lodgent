@@ -29,12 +29,13 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [x] Worker: outbox dispatcher, Postgres/SQS job runners, local scheduler
 
 ### M2: Apaleo integration
-- [ ] OAuth 2.0 authorization-code flow, token refresh, KMS envelope-encrypted token storage
-- [ ] Idempotent incremental sync of properties, unit groups, rate plans, policies
-- [ ] Live offers with all-in totals (taxes and mandatory fees), cancellation policy, short-TTL cache
-- [ ] Create and cancel reservations with guest details and payment reference
-- [ ] Webhook subscription for reservation changes
-- [ ] Fake Apaleo server + fixtures; typed client
+- [x] OAuth 2.0 authorization-code flow, token refresh (serialized; Apaleo rotates refresh tokens), KMS envelope-encrypted token storage
+- [x] Idempotent sync of properties, unit groups, rate plans, cancellation policies (hotel edits preserved)
+- [x] Live offers with all-in totals (VAT, city tax, mandatory fees), cancellation policy, short-TTL quote cache
+- [x] Create and cancel reservations with guest details and payment reference; folio payment posting (adapter; used in M5)
+- [x] Webhook subscription + receiver (secret URL, de-duplication, job). Reservation status updates are applied in M5
+- [x] Fake Apaleo server + fixtures (3 boutique hotels). Zod-validated client instead of codegen (ADR 0006: specs unreachable from the build environment)
+- [x] Dashboard: Connections page (connect/sync/disconnect), Rooms & rates with per-rate-plan agent opt-in and live offer preview
 
 ### M3: Attribute profile
 - [ ] Taxonomy package with ~150 seed attributes

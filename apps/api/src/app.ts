@@ -9,6 +9,7 @@ import { registerErrorHandler } from './http/errors';
 import { buildOpenApi } from './http/openapi';
 import { Router } from './http/router';
 import { registerAccountRoutes } from './routes/account';
+import { registerIntegrationRoutes } from './routes/integrations';
 import { registerOrganizationRoutes } from './routes/organizations';
 import { registerPropertyRoutes } from './routes/properties';
 
@@ -78,6 +79,7 @@ export async function buildApp(container: Container): Promise<App> {
   registerAccountRoutes(router, container);
   registerOrganizationRoutes(router, container);
   registerPropertyRoutes(router, container);
+  registerIntegrationRoutes(router, container);
 
   server.get('/healthz', async () => ({ ok: true, service: `${BRAND.slug}-api` }));
   server.get('/readyz', async (_req, reply) => {

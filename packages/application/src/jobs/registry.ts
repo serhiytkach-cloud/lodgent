@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import { z } from 'zod';
 import type { Container } from '../container';
 
 export interface JobContext {
@@ -8,6 +9,13 @@ export interface JobContext {
 }
 
 export type JobHandler = (payload: Record<string, unknown>, ctx: JobContext) => Promise<void>;
+
+const OrgPayload = z.object({ orgId: z.uuid() });
+const ReservationChanged = z.object({
+  orgId: z.uuid(),
+  pmsReservationId: z.string(),
+  event: z.string().optional(),
+});
 
 /** A job that should be retried later without counting as a failure (e.g. upstream rate limit). */
 export class RetryLaterError extends Error {
@@ -24,9 +32,31 @@ export class RetryLaterError extends Error {
  * once and the Postgres queue retries after a crash.
  */
 export function createJobHandlers(container: Container): Record<string, JobHandler> {
+  const { services, db, clock, queue } = container;
   return {
     'outbox.dispatch': async () => {
-      await container.services.outbox.dispatchBatch(100);
+      await services.outbox.dispatchBatch(100);
+    },
+    'pms.sync': async (payload) => {
+      const { orgId } = OrgPayload.parse(payload);
+      await services.pmsSync.syncOrganization(orgId);
+    },
+    'pms.sync-all': async () => {
+      const connections = await db.system(({ pms }) => pms.activeConnections());
+      for (const c of connections) {
+        await queue.enqueue({ type: 'pms.sync', payload: { orgId: c.organizationId } });
+      }
+    },
+    'pms.reservation-changed': async (payload, ctx) => {
+      const { orgId, pmsReservationId } = ReservationChanged.parse(payload);
+      const client = await services.pmsConnections.clientFor(orgId);
+      const reservation = await client.getReservation(pmsReservationId);
+      ctx.logger.info({ orgId, pmsReservationId, status: reservation?.status }, 'PMS reservation changed');
+    },
+    'offers.cleanup': async () => {
+      await db.system(({ pms }) =>
+        pms.deleteExpiredQuotes(new Date(clock.now().getTime() - 24 * 3600 * 1000)),
+      );
     },
   };
 }

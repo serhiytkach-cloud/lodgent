@@ -13,7 +13,7 @@ export const DEV_SECRETS = {
   authDevSecret: 'dev-only-auth-secret-change-me-0123456789abcdef',
   localKmsMasterKey: 'ZGV2LW9ubHktbG9jYWwta21zLWtleS0zMi1ieXRlcyE=',
   internalApiToken: 'dev-internal-token',
-  offerSigningSecret: 'dev-only-offer-signing-secret-0123456789',
+  signingSecret: 'dev-only-signing-secret-0123456789abcdefghij',
   stripeSecretKey: 'sk_test_lodgent_fake',
   stripePublishableKey: 'pk_test_lodgent_fake',
   stripeWebhookSecret: 'whsec_lodgent_fake_0123456789abcdef',
@@ -59,6 +59,10 @@ const EnvSchema = z.object({
   APALEO_WEBHOOK_URL: z.url().default('http://localhost:4010'),
   /** Shared secret Apaleo sends back on webhook calls (embedded in the subscription's endpoint URL). */
   APALEO_WEBHOOK_TOKEN: z.string().default('dev-apaleo-webhook-token'),
+  /** Space-separated OAuth scopes; must match the app registration in the Apaleo store. */
+  APALEO_SCOPES: optionalString,
+  /** Channel Apaleo offers and bookings use. Rate plans must be distributed on it. */
+  APALEO_CHANNEL_CODE: z.enum(['Ibe', 'Direct']).default('Ibe'),
 
   STRIPE_SECRET_KEY: z.string().default(DEV_SECRETS.stripeSecretKey),
   STRIPE_PUBLISHABLE_KEY: z.string().default(DEV_SECRETS.stripePublishableKey),
@@ -81,7 +85,8 @@ const EnvSchema = z.object({
   HOLD_TTL_MINUTES: int(15),
   OFFER_CACHE_TTL_SECONDS: int(60),
   OFFER_VALIDITY_MINUTES: int(30),
-  OFFER_SIGNING_SECRET: z.string().min(16).default(DEV_SECRETS.offerSigningSecret),
+  /** Root secret for signed tokens (OAuth state, checkout links); per-purpose keys are derived from it. */
+  SIGNING_SECRET: z.string().min(32).default(DEV_SECRETS.signingSecret),
   PII_RETENTION_DAYS: int(30),
   VISIBILITY_RAW_RETENTION_DAYS: int(90),
   VISIBILITY_DEFAULT_MONTHLY_CAP_CENTS: int(5000),
@@ -118,6 +123,8 @@ export interface AppConfig {
     webhookUrl: string;
     webhookToken: string;
     redirectUri: string;
+    scopes: string[] | null;
+    channelCode: 'Ibe' | 'Direct';
   };
   stripe: { secretKey: string; publishableKey: string; webhookSecret: string; apiBaseUrl?: string };
   llm: {
@@ -136,12 +143,12 @@ export interface AppConfig {
     holdTtlMinutes: number;
     offerCacheTtlSeconds: number;
     offerValidityMinutes: number;
-    offerSigningSecret: string;
     piiRetentionDays: number;
     visibilityRawRetentionDays: number;
     visibilityDefaultMonthlyCapCents: number;
   };
   rateLimits: { anonymousPerMinute: number; partnerPerMinute: number };
+  signingSecret: string;
   crawler: { allowPrivateNetworks: boolean };
   otelEndpoint?: string;
 }
@@ -209,6 +216,8 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       webhookUrl: stripSlash(e.APALEO_WEBHOOK_URL),
       webhookToken: e.APALEO_WEBHOOK_TOKEN,
       redirectUri: `${stripSlash(e.API_BASE_URL)}/v1/integrations/apaleo/callback`,
+      scopes: e.APALEO_SCOPES ? e.APALEO_SCOPES.split(/\s+/).filter(Boolean) : null,
+      channelCode: e.APALEO_CHANNEL_CODE,
     },
     stripe: {
       secretKey: e.STRIPE_SECRET_KEY,
@@ -236,7 +245,6 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       holdTtlMinutes: e.HOLD_TTL_MINUTES,
       offerCacheTtlSeconds: e.OFFER_CACHE_TTL_SECONDS,
       offerValidityMinutes: e.OFFER_VALIDITY_MINUTES,
-      offerSigningSecret: e.OFFER_SIGNING_SECRET,
       piiRetentionDays: e.PII_RETENTION_DAYS,
       visibilityRawRetentionDays: e.VISIBILITY_RAW_RETENTION_DAYS,
       visibilityDefaultMonthlyCapCents: e.VISIBILITY_DEFAULT_MONTHLY_CAP_CENTS,
@@ -246,6 +254,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       partnerPerMinute: e.PARTNER_RATE_LIMIT_PER_MINUTE,
     },
     crawler: { allowPrivateNetworks: e.CRAWL_ALLOW_PRIVATE_NETWORKS },
+    signingSecret: e.SIGNING_SECRET,
     otelEndpoint: e.OTEL_EXPORTER_OTLP_ENDPOINT,
   };
 
@@ -259,8 +268,8 @@ function assertProductionReady(config: AppConfig): void {
   if (config.kms.provider !== 'aws') problems.push('KMS_PROVIDER must be aws');
   if (config.internalApiToken === DEV_SECRETS.internalApiToken)
     problems.push('INTERNAL_API_TOKEN uses the dev default');
-  if (config.business.offerSigningSecret === DEV_SECRETS.offerSigningSecret)
-    problems.push('OFFER_SIGNING_SECRET uses the dev default');
+  if (config.signingSecret === DEV_SECRETS.signingSecret)
+    problems.push('SIGNING_SECRET uses the dev default');
   if (config.stripe.secretKey === DEV_SECRETS.stripeSecretKey) problems.push('STRIPE_SECRET_KEY is not set');
   if (config.stripe.webhookSecret === DEV_SECRETS.stripeWebhookSecret)
     problems.push('STRIPE_WEBHOOK_SECRET is not set');

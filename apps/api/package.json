@@ -23,6 +23,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@lodgent/apaleo": "workspace:*",
     "@testcontainers/postgresql": "12.2.0",
     "@types/node": "^22.19.0",
     "pino-pretty": "13.2.0",

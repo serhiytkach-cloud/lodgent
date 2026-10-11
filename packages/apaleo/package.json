@@ -4,19 +4,23 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fake": "./src/fake/server.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsx watch --clear-screen=false src/fake/main.ts"
   },
   "dependencies": {
     "@lodgent/core": "workspace:*",
     "@lodgent/shared": "workspace:*",
+    "fastify": "5.12.5",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
+    "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

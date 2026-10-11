@@ -1,4 +1,5 @@
 import type { Tx } from '../client';
+import { offerQuoteRepo, pmsConnectionRepo, policyRepo, ratePlanRepo, roomTypeRepo } from './pms';
 import {
   auditRepo,
   invitationRepo,
@@ -19,6 +20,11 @@ export function tenantRepos(tx: Tx, orgId: string) {
     properties: propertyRepo(tx, orgId),
     audit: auditRepo(tx, orgId),
     outbox: outboxRepo(tx, orgId),
+    pmsConnection: pmsConnectionRepo(tx, orgId),
+    roomTypes: roomTypeRepo(tx, orgId),
+    ratePlans: ratePlanRepo(tx, orgId),
+    policies: policyRepo(tx, orgId),
+    offerQuotes: offerQuoteRepo(tx, orgId),
   };
 }
 

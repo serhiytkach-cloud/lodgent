@@ -29,6 +29,20 @@
       "when": 1791689453503,
       "tag": "0003_agent_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791690936559,
+      "tag": "0004_pms",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791690937399,
+      "tag": "0005_pms_rls",
+      "breakpoints": true
     }
   ]
 }

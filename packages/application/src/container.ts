@@ -1,9 +1,11 @@
+import { ApaleoProvider } from '@lodgent/apaleo';
 import {
   type Clock,
   type IdentityProvider,
   type JobQueue,
   type KeyManagement,
   type Mailer,
+  type PmsProvider,
   systemClock,
 } from '@lodgent/core';
 import { Database } from '@lodgent/db';
@@ -15,12 +17,18 @@ import type { AppConfig } from './config';
 import { AwsKeyManagement, LocalKeyManagement } from './infra/kms';
 import { SesMailer, SmtpMailer } from './infra/mailer';
 import { PgJobQueue, SqsJobQueue } from './infra/queue';
+import { Signer } from './infra/signing';
 import { AccountService } from './services/accounts';
 import { AgentClientService } from './services/agent-clients';
 import { AuditService } from './services/audit';
+import { InventoryService } from './services/inventory';
 import { MemberService } from './services/members';
+import { OfferService } from './services/offers';
 import { OrganizationService } from './services/organizations';
 import { OutboxDispatcher } from './services/outbox-dispatcher';
+import { PmsConnectionService } from './services/pms-connections';
+import { PmsSyncService } from './services/pms-sync';
+import { PmsWebhookService } from './services/pms-webhooks';
 import { PropertyService } from './services/properties';
 
 export interface Adapters {
@@ -33,6 +41,8 @@ export interface Adapters {
   kms: KeyManagement;
   mailer: Mailer;
   queue: JobQueue;
+  pms: PmsProvider;
+  signer: Signer;
 }
 
 export interface Container extends Adapters {
@@ -42,7 +52,40 @@ export interface Container extends Adapters {
 }
 
 function createServices(config: AppConfig, a: Adapters) {
+  const pmsConnections = new PmsConnectionService({
+    db: a.db,
+    clock: a.clock,
+    kms: a.kms,
+    provider: a.pms,
+    signer: a.signer,
+    logger: a.logger,
+    redirectUri: config.apaleo.redirectUri,
+    webBaseUrl: config.webBaseUrl,
+  });
   return {
+    pmsConnections,
+    pmsSync: new PmsSyncService({
+      db: a.db,
+      clock: a.clock,
+      connections: pmsConnections,
+      logger: a.logger,
+      webhookEndpoint: `${config.apiBaseUrl}/webhooks/apaleo/${config.apaleo.webhookToken}`,
+      defaultFeeBps: config.business.defaultFeeBps,
+    }),
+    pmsWebhooks: new PmsWebhookService({
+      db: a.db,
+      clock: a.clock,
+      logger: a.logger,
+      webhookToken: config.apaleo.webhookToken,
+    }),
+    offers: new OfferService({
+      db: a.db,
+      clock: a.clock,
+      connections: pmsConnections,
+      cacheTtlSeconds: config.business.offerCacheTtlSeconds,
+      validityMinutes: config.business.offerValidityMinutes,
+    }),
+    inventory: new InventoryService(a.db),
     accounts: new AccountService(a.db, a.clock),
     agentClients: new AgentClientService(a.db, a.clock),
     organizations: new OrganizationService(a.db),
@@ -122,6 +165,18 @@ export function createContainer(
         })
       : new PgJobQueue(db));
 
+  const pms =
+    overrides.pms ??
+    new ApaleoProvider({
+      clientId: config.apaleo.clientId,
+      clientSecret: config.apaleo.clientSecret,
+      identityUrl: config.apaleo.identityUrl,
+      apiUrl: config.apaleo.apiUrl,
+      webhookUrl: config.apaleo.webhookUrl,
+      scopes: config.apaleo.scopes ?? undefined,
+      channelCode: config.apaleo.channelCode,
+    });
+
   const adapters: Adapters = {
     clock: overrides.clock ?? systemClock,
     logger,
@@ -131,6 +186,8 @@ export function createContainer(
     kms,
     mailer,
     queue,
+    pms,
+    signer: overrides.signer ?? new Signer(config.signingSecret),
   };
 
   return {
