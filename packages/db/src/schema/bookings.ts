@@ -173,6 +173,12 @@ export const bookings = pgTable(
     index('bookings_property_idx').on(t.propertyId, t.createdAt),
     index('bookings_status_idx').on(t.status, t.updatedAt),
     index('bookings_pms_reservation_idx').on(t.pmsReservationId),
+    // Guest data export and erasure look bookings up by email, case-insensitively, within one org.
+    index('bookings_guest_email_idx')
+      .on(t.organizationId, sql`lower(${t.guestEmail})`)
+      .where(sql`${t.guestEmail} is not null`),
+    // The retention job scans bookings whose guest data has not been redacted yet.
+    index('bookings_pii_retention_idx').on(t.departure).where(sql`${t.piiRedactedAt} is null`),
   ],
 );
 

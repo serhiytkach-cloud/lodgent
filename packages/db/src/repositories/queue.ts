@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Tx } from '../client';
 import { jobs, outbox } from '../schema';
 
@@ -21,12 +21,53 @@ export function outboxDispatchRepo(tx: Tx) {
     async markDispatched(id: number, now: Date) {
       await tx.update(outbox).set({ dispatchedAt: now }).where(eq(outbox.id, id));
     },
-    /** Drops a delivered message's content (invitation links, guest emails) but keeps the row. */
+    /**
+     * Drops a delivered message's content (invitation links, guest emails) but keeps the row. Errors
+     * from earlier attempts go too: provider messages can quote the recipient's address.
+     */
     async scrub(id: number) {
       await tx
         .update(outbox)
-        .set({ payload: { scrubbed: true } })
+        .set({ payload: { scrubbed: true }, lastError: null })
         .where(eq(outbox.id, id));
+    },
+    /** Retention: deletes up to `limit` messages delivered before `before`. Returns how many. */
+    async deleteDispatchedBefore(before: Date, limit: number): Promise<number> {
+      const ids = tx
+        .select({ id: outbox.id })
+        .from(outbox)
+        .where(lt(outbox.dispatchedAt, before))
+        .orderBy(asc(outbox.id))
+        .limit(limit)
+        .for('update', { skipLocked: true });
+      const result = await tx.delete(outbox).where(inArray(outbox.id, ids));
+      return result.rowCount ?? 0;
+    },
+    /**
+     * Retention: gives up on emails that still could not be delivered after `createdBefore` and
+     * deletes them with their recipient and content. Returns the deleted rows (no payloads).
+     */
+    async deleteUndeliveredEmails(
+      createdBefore: Date,
+      limit: number,
+    ): Promise<{ id: number; organizationId: string | null; attempts: number }[]> {
+      const ids = tx
+        .select({ id: outbox.id })
+        .from(outbox)
+        .where(
+          and(
+            isNull(outbox.dispatchedAt),
+            eq(outbox.topic, 'email.send'),
+            lt(outbox.createdAt, createdBefore),
+          ),
+        )
+        .orderBy(asc(outbox.id))
+        .limit(limit)
+        .for('update', { skipLocked: true });
+      return tx
+        .delete(outbox)
+        .where(inArray(outbox.id, ids))
+        .returning({ id: outbox.id, organizationId: outbox.organizationId, attempts: outbox.attempts });
     },
     async markFailed(id: number, error: string, retryAt: Date) {
       await tx
@@ -114,6 +155,24 @@ export function jobRepo(tx: Tx) {
         .update(jobs)
         .set({ lastError: error.slice(0, 2000), failedAt: now, lockedUntil: null })
         .where(eq(jobs.id, id));
+    },
+    /**
+     * Retention: deletes up to `limit` finished jobs, completed before `completedBefore` or failed
+     * before `failedBefore` (failed ones are kept longer for investigation). Returns how many.
+     */
+    async deleteFinished(
+      cutoffs: { completedBefore: Date; failedBefore: Date },
+      limit: number,
+    ): Promise<number> {
+      const ids = tx
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(or(lt(jobs.completedAt, cutoffs.completedBefore), lt(jobs.failedAt, cutoffs.failedBefore)))
+        .orderBy(asc(jobs.id))
+        .limit(limit)
+        .for('update', { skipLocked: true });
+      const result = await tx.delete(jobs).where(inArray(jobs.id, ids));
+      return result.rowCount ?? 0;
     },
   };
 }

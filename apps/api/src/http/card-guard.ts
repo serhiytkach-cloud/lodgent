@@ -1,3 +1,4 @@
+import { redactUrl } from '@lodgent/application';
 import type { FastifyInstance } from 'fastify';
 
 /** Luhn checksum, used by every payment card number. */
@@ -44,7 +45,7 @@ export function registerCardDataGuard(server: FastifyInstance): void {
   server.addHook('preValidation', async (req, reply) => {
     if (!req.rawBody || req.url.startsWith('/webhooks/')) return;
     if (containsCardNumber(req.rawBody.toString('utf8'))) {
-      req.log.warn({ url: req.url }, 'rejected a request containing card-like data');
+      req.log.warn({ url: redactUrl(req.url) }, 'rejected a request containing card-like data');
       return reply.status(400).send({
         error: {
           code: 'card_data_rejected',

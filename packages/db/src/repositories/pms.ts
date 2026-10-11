@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, sql } from 'drizzle-orm';
 import type { Tx } from '../client';
 import {
   offerQuotes,
@@ -328,6 +328,21 @@ export function pmsSystemRepo(tx: Tx) {
         .update(webhookEvents)
         .set({ processedAt: now })
         .where(and(eq(webhookEvents.provider, provider), eq(webhookEvents.eventId, eventId)));
+    },
+    /**
+     * Retention: forgets webhook events received before `before` (only ids and types are stored;
+     * providers stop retrying long before). Returns how many were deleted.
+     */
+    async deleteWebhookEventsBefore(before: Date, limit: number): Promise<number> {
+      const ids = tx
+        .select({ id: webhookEvents.id })
+        .from(webhookEvents)
+        .where(lt(webhookEvents.receivedAt, before))
+        .orderBy(webhookEvents.receivedAt)
+        .limit(limit)
+        .for('update', { skipLocked: true });
+      const result = await tx.delete(webhookEvents).where(inArray(webhookEvents.id, ids));
+      return result.rowCount ?? 0;
     },
     async ratePlansByIds(ids: string[]) {
       if (ids.length === 0) return [];

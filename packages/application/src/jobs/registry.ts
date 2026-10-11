@@ -105,8 +105,8 @@ export function createJobHandlers(container: Container): Record<string, JobHandl
       await services.billing.syncInvoice(orgId, feeInvoiceId, providerInvoiceId);
     },
     'privacy.retention': async (_payload, ctx) => {
-      const redacted = await services.checkout.redactExpiredGuestData();
-      if (redacted > 0) ctx.logger.info({ redacted }, 'guest data redacted');
+      const result = await services.privacy.runRetention();
+      if (Object.values(result).some((n) => n > 0)) ctx.logger.info(result, 'retention purge');
     },
     'profile.map-pms': async (payload) => {
       const { orgId, propertyId } = PropertyPayload.parse(payload);

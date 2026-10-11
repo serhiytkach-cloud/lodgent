@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { Tx } from '../client';
 import { auditLogs, invitations, memberships, organizations, outbox, properties, users } from '../schema';
 
@@ -170,18 +170,38 @@ export function propertyRepo(tx: Tx, orgId: string) {
   };
 }
 
+export interface AuditEntry {
+  actorType: 'user' | 'system';
+  actorUserId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  changes?: Record<string, unknown> | null;
+  requestId?: string | null;
+}
+
 export function auditRepo(tx: Tx, orgId: string) {
   return {
-    async record(entry: {
-      actorType: 'user' | 'system';
-      actorUserId: string | null;
-      action: string;
-      entityType: string;
-      entityId: string | null;
-      changes?: Record<string, unknown> | null;
-      requestId?: string | null;
-    }) {
+    async record(entry: AuditEntry) {
       await tx.insert(auditLogs).values({ ...entry, organizationId: orgId });
+    },
+    async recordMany(entries: AuditEntry[]) {
+      if (entries.length === 0) return;
+      await tx.insert(auditLogs).values(entries.map((entry) => ({ ...entry, organizationId: orgId })));
+    },
+    /** How many entries with one of `actions` were written since `since` (simple per-org quotas). */
+    async countSince(actions: string[], since: Date): Promise<number> {
+      const [row] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.organizationId, orgId),
+            inArray(auditLogs.action, actions),
+            gte(auditLogs.createdAt, since),
+          ),
+        );
+      return row?.n ?? 0;
     },
     async list(options: { limit: number; before?: Date }) {
       return tx
@@ -228,6 +248,25 @@ export function outboxRepo(tx: Tx, orgId: string | null) {
           availableAt: options?.availableAt,
         })
         .onConflictDoNothing({ target: outbox.dedupeKey });
+    },
+    /**
+     * Guest erasure: drops booking confirmations to `email` that have not been sent yet (sent ones
+     * are already scrubbed by the dispatcher). Returns how many were removed.
+     */
+    async deletePendingGuestEmails(email: string): Promise<number> {
+      if (!orgId) return 0;
+      const result = await tx
+        .delete(outbox)
+        .where(
+          and(
+            eq(outbox.organizationId, orgId),
+            eq(outbox.topic, 'email.send'),
+            isNull(outbox.dispatchedAt),
+            sql`${outbox.payload}->>'template' = 'booking-confirmation'`,
+            sql`lower(${outbox.payload}->>'to') = lower(${email})`,
+          ),
+        );
+      return result.rowCount ?? 0;
     },
   };
 }

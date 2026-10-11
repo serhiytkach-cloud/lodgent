@@ -380,8 +380,8 @@ describe('guest checkout', () => {
         sql`update bookings set departure = (current_date - interval '400 days')::date where status = 'confirmed'`,
       ),
     );
-    const redacted = await app.container.services.checkout.redactExpiredGuestData();
-    expect(redacted).toBeGreaterThan(0);
+    const { bookingsRedacted } = await app.container.services.privacy.runRetention();
+    expect(bookingsRedacted).toBeGreaterThan(0);
     const rows = await app.container.db.system(
       async ({ tx }) =>
         (
