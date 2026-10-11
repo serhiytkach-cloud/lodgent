@@ -30,6 +30,15 @@ const EnvSchema = z.object({
   INTERNAL_API_TOKEN: z.string().min(8).default(DEV_SECRETS.internalApiToken),
 
   DATABASE_URL: z.string().default('postgres://lodgent:lodgent@localhost:5432/lodgent'),
+  /**
+   * Alternative to DATABASE_URL, used on AWS where ECS injects the RDS secret's username and
+   * password separately. When DATABASE_HOST is set, the URL is built from these parts.
+   */
+  DATABASE_HOST: optionalString,
+  DATABASE_PORT: z.preprocess(blank, z.coerce.number().int().min(1).max(65535).default(5432)),
+  DATABASE_NAME: optionalString,
+  DATABASE_USER: optionalString,
+  DATABASE_PASSWORD: optionalString,
   DATABASE_SSL: bool(false),
   DATABASE_POOL_MAX: int(10),
 
@@ -202,7 +211,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     apiBaseUrl: stripSlash(e.API_BASE_URL),
     apiPort: e.API_PORT,
     internalApiToken: e.INTERNAL_API_TOKEN,
-    database: { url: e.DATABASE_URL, ssl: e.DATABASE_SSL, poolMax: e.DATABASE_POOL_MAX },
+    database: { url: databaseUrl(e), ssl: e.DATABASE_SSL, poolMax: e.DATABASE_POOL_MAX },
     auth:
       e.AUTH_PROVIDER === 'cognito'
         ? {
@@ -309,6 +318,23 @@ function assertProductionReady(config: AppConfig): void {
     problems.push('APALEO_WEBHOOK_TOKEN uses the dev default');
   if (problems.length > 0)
     throw new ConfigError(`Production configuration is incomplete: ${problems.join('; ')}`);
+}
+
+/**
+ * DATABASE_URL, or a URL built from DATABASE_HOST/PORT/NAME/USER/PASSWORD when DATABASE_HOST is set.
+ * User, password and database name are percent-encoded, so generated passwords with reserved
+ * characters survive. With DATABASE_SSL the URL also carries `sslmode=verify-full`, so code that
+ * only receives the URL (the migration runner) still negotiates TLS and verifies the server
+ * certificate (RDS enforces TLS with rds.force_ssl=1).
+ */
+function databaseUrl(e: Env): string {
+  if (!e.DATABASE_HOST) return e.DATABASE_URL;
+  const host = e.DATABASE_HOST.includes(':') ? `[${e.DATABASE_HOST}]` : e.DATABASE_HOST;
+  const user = encodeURIComponent(required(e.DATABASE_USER, 'DATABASE_USER'));
+  const password = encodeURIComponent(required(e.DATABASE_PASSWORD, 'DATABASE_PASSWORD'));
+  const name = encodeURIComponent(required(e.DATABASE_NAME, 'DATABASE_NAME'));
+  const query = e.DATABASE_SSL ? '?sslmode=verify-full' : '';
+  return `postgres://${user}:${password}@${host}:${e.DATABASE_PORT}/${name}${query}`;
 }
 
 function required(value: string | undefined, name: string): string {

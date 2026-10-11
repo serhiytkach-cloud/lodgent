@@ -1,71 +1,13 @@
 import type { JobQueue } from '@lodgent/core';
+import { SCHEDULES, type Schedule } from '@lodgent/shared';
 import type { Logger } from 'pino';
 
 /**
- * Recurring jobs. In AWS each entry becomes an EventBridge Scheduler schedule that sends the job to
- * SQS (see infra/lib/app-stack.ts, which imports this list). Locally the worker's in-process
- * scheduler enqueues them.
+ * The schedule list lives in @lodgent/shared (pure data) so the CDK app can turn every entry into an
+ * EventBridge Scheduler schedule that sends the job to SQS. Locally the worker's in-process
+ * scheduler below enqueues them. Re-exported here for existing imports.
  */
-export interface Schedule {
-  name: string;
-  /** Run every N minutes, aligned to the epoch. */
-  everyMinutes: number;
-  /** EventBridge `rate()` or `cron()` expression for AWS. */
-  expression: string;
-  job: { type: string; payload: Record<string, unknown> };
-}
-
-export const SCHEDULES: Schedule[] = [
-  {
-    name: 'pms-sync-all',
-    everyMinutes: 360,
-    expression: 'rate(6 hours)',
-    job: { type: 'pms.sync-all', payload: {} },
-  },
-  {
-    name: 'holds-expire',
-    everyMinutes: 1,
-    expression: 'rate(1 minute)',
-    job: { type: 'holds.expire', payload: {} },
-  },
-  {
-    name: 'checkout-reconcile',
-    everyMinutes: 5,
-    expression: 'rate(5 minutes)',
-    job: { type: 'checkout.reconcile', payload: {} },
-  },
-  {
-    name: 'privacy-retention',
-    everyMinutes: 1440,
-    expression: 'cron(30 3 * * ? *)',
-    job: { type: 'privacy.retention', payload: {} },
-  },
-  {
-    name: 'visibility-weekly',
-    everyMinutes: 7 * 1440,
-    expression: 'cron(15 4 ? * MON *)',
-    job: { type: 'visibility.schedule-all', payload: {} },
-  },
-  {
-    name: 'visibility-purge',
-    everyMinutes: 1440,
-    expression: 'cron(45 3 * * ? *)',
-    job: { type: 'visibility.purge', payload: {} },
-  },
-  {
-    // Invoices last month's pay-at-hotel fees (idempotent per period) and re-checks open invoices.
-    name: 'billing-daily',
-    everyMinutes: 1440,
-    expression: 'cron(10 6 * * ? *)',
-    job: { type: 'billing.daily', payload: {} },
-  },
-  {
-    name: 'offers-cleanup',
-    everyMinutes: 60,
-    expression: 'rate(1 hour)',
-    job: { type: 'offers.cleanup', payload: {} },
-  },
-];
+export { SCHEDULES, type Schedule };
 
 /** Enqueues due schedules. Dedupe keys make concurrent workers enqueue each slot only once. */
 export class LocalScheduler {
@@ -75,7 +17,7 @@ export class LocalScheduler {
   constructor(
     private readonly queue: JobQueue,
     private readonly logger: Logger,
-    private readonly schedules: Schedule[] = SCHEDULES,
+    private readonly schedules: readonly Schedule[] = SCHEDULES,
   ) {}
 
   async tick(now = new Date()): Promise<void> {

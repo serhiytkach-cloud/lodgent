@@ -1,16 +1,8 @@
-import { BRAND } from '@lodgent/shared';
-import { App, Tags } from 'aws-cdk-lib';
-import { NetworkStack } from '../lib/network-stack';
+import { App } from 'aws-cdk-lib';
+import { defineStacks } from '../lib/lodgent';
 
+// Offline and environment-agnostic (account from the deploying credentials, region from context):
+// `cdk synth` needs no AWS credentials. See docs/runbooks/aws-infrastructure.md for context keys.
 const app = new App();
-
-for (const envName of ['dev', 'prod'] as const) {
-  const prefix = `${BRAND.slug}-${envName}`;
-  new NetworkStack(app, `${prefix}-network`, {
-    envName,
-    natGateways: envName === 'prod' ? 2 : 1,
-  });
-  Tags.of(app).add('app', BRAND.slug);
-}
-
+defineStacks(app);
 app.synth();
