@@ -1,0 +1,33 @@
+# Build context for apps/*/Dockerfile is the repository root. Keep it small (faster uploads, fewer
+# cache misses) and keep anything secret or machine-specific out of the images.
+
+# Dependencies and build output: images install and build from scratch.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/cdk.out
+**/coverage
+**/*.tsbuildinfo
+**/next-env.d.ts
+
+# Local environment and secrets.
+**/.env
+**/.env.*
+.localstack
+
+# Test and tool artefacts.
+**/test-results
+**/playwright-report
+**/blob-report
+**/*.log
+**/.DS_Store
+
+# Not needed to build or run the apps.
+.git
+.github
+docs
+docker
+*.md
+**/Dockerfile
+.dockerignore
