@@ -165,4 +165,4 @@ aws ecs run-task --cluster lodgent-<env> --launch-type FARGATE \
   1. Find the rule in the WAF logs (`terminatingRuleId`, labels).
   2. Switch that single managed rule to count via `ruleActionOverrides` in `infra/lib/waf.ts`.
   3. If needed, re-enforce it with a label rule that excludes only the affected path (as done for body size).
-- **Tearing down dev:** `cdk destroy 'lodgent-dev-*'`. The database leaves a final snapshot, and KMS keys enter their 30-day deletion window. Prod stacks have termination protection and retain their data.
+- **Tearing down dev:** `pnpm --filter @lodgent/infra exec cdk destroy 'lodgent-dev-*' -c env=dev`. The database leaves a final snapshot, and the KMS keys enter their 30-day deletion window. The snapshot is encrypted with the `data` key: cancel that key's deletion (`aws kms cancel-key-deletion`) if you want to restore it later. Prod stacks have termination protection and retain their data.

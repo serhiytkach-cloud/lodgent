@@ -203,6 +203,7 @@ describe('runtime configuration contract', () => {
         DATABASE_NAME: 'lodgent',
         OTEL_EXPORTER_OTLP_ENDPOINT: OTLP_ENDPOINT,
         OTEL_SERVICE_NAME: otelName,
+        OTEL_RESOURCE_ATTRIBUTES: 'deployment.environment.name=prod,deployment.environment=prod',
         APALEO_API_URL: 'https://api.apaleo.com',
       });
       for (const key of [

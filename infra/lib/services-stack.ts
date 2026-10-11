@@ -99,6 +99,8 @@ export class ServicesStack extends Stack {
       ...databaseEnvironment(config, data),
       OTEL_EXPORTER_OTLP_ENDPOINT: OTLP_ENDPOINT,
       OTEL_SERVICE_NAME: otelServiceName(config, service),
+      // Standard resource attributes, so traces of dev and prod stay apart in X-Ray.
+      OTEL_RESOURCE_ATTRIBUTES: `deployment.environment.name=${config.envName},deployment.environment=${config.envName}`,
       ...config.appEnvironment,
     });
 
