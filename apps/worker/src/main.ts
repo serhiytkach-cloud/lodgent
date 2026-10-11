@@ -11,6 +11,7 @@ import {
 loadDotEnv();
 const config = loadConfig();
 const container = createContainer(config, { name: 'worker' });
+await container.init();
 const { logger } = container;
 const handlers = createJobHandlers(container);
 const controller = new AbortController();

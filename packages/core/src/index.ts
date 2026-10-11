@@ -1,8 +1,11 @@
 export * from './errors';
 export * from './fees';
+export * from './jsonld';
 export * from './permissions';
+export * from './ports/ai';
 export type * from './ports/identity';
 export * from './ports/messaging';
 export * from './ports/pms';
 export * from './pricing';
+export * from './profile';
 export * from './slug';

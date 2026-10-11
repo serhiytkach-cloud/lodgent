@@ -1,6 +1,8 @@
 import { ApaleoProvider } from '@lodgent/apaleo';
 import {
   type Clock,
+  type EmbeddingModel,
+  type ExtractionModel,
   type IdentityProvider,
   type JobQueue,
   type KeyManagement,
@@ -9,7 +11,15 @@ import {
   systemClock,
 } from '@lodgent/core';
 import { Database } from '@lodgent/db';
+import {
+  ClaudeExtractionModel,
+  KeywordExtractionModel,
+  LocalHashEmbedding,
+  OpenAIEmbedding,
+  VoyageEmbedding,
+} from '@lodgent/llm';
 import { BRAND } from '@lodgent/shared';
+import { ATTRIBUTES } from '@lodgent/taxonomy';
 import pino, { type Logger } from 'pino';
 import { CognitoIdentityProvider } from './auth/cognito-identity';
 import { DevIdentityProvider } from './auth/dev-identity';
@@ -21,6 +31,7 @@ import { Signer } from './infra/signing';
 import { AccountService } from './services/accounts';
 import { AgentClientService } from './services/agent-clients';
 import { AuditService } from './services/audit';
+import { CatalogService } from './services/catalog';
 import { InventoryService } from './services/inventory';
 import { MemberService } from './services/members';
 import { OfferService } from './services/offers';
@@ -29,7 +40,9 @@ import { OutboxDispatcher } from './services/outbox-dispatcher';
 import { PmsConnectionService } from './services/pms-connections';
 import { PmsSyncService } from './services/pms-sync';
 import { PmsWebhookService } from './services/pms-webhooks';
+import { ProfileService } from './services/profile';
 import { PropertyService } from './services/properties';
+import { WebsiteImportService } from './services/website-import';
 
 export interface Adapters {
   clock: Clock;
@@ -43,11 +56,15 @@ export interface Adapters {
   queue: JobQueue;
   pms: PmsProvider;
   signer: Signer;
+  extraction: ExtractionModel;
+  embeddings: EmbeddingModel;
 }
 
 export interface Container extends Adapters {
   config: AppConfig;
   services: ReturnType<typeof createServices>;
+  /** One-time startup work (taxonomy sync). Idempotent. */
+  init(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -62,8 +79,28 @@ function createServices(config: AppConfig, a: Adapters) {
     redirectUri: config.apaleo.redirectUri,
     webBaseUrl: config.webBaseUrl,
   });
+  const catalog = new CatalogService({
+    db: a.db,
+    clock: a.clock,
+    embeddings: a.embeddings,
+    webBaseUrl: config.webBaseUrl,
+  });
   return {
     pmsConnections,
+    catalog,
+    profile: new ProfileService({
+      db: a.db,
+      clock: a.clock,
+      onProfileChanged: CatalogService.afterProfileChange,
+    }),
+    websiteImport: new WebsiteImportService({
+      db: a.db,
+      clock: a.clock,
+      extraction: a.extraction,
+      logger: a.logger,
+      allowPrivateNetworks: config.crawler.allowPrivateNetworks,
+      crawlDelayMs: config.env === 'production' ? 1000 : 50,
+    }),
     pmsSync: new PmsSyncService({
       db: a.db,
       clock: a.clock,
@@ -71,6 +108,8 @@ function createServices(config: AppConfig, a: Adapters) {
       logger: a.logger,
       webhookEndpoint: `${config.apiBaseUrl}/webhooks/apaleo/${config.apaleo.webhookToken}`,
       defaultFeeBps: config.business.defaultFeeBps,
+      onPropertySynced: (orgId, propertyId) =>
+        a.queue.enqueue({ type: 'profile.map-pms', payload: { orgId, propertyId } }),
     }),
     pmsWebhooks: new PmsWebhookService({
       db: a.db,
@@ -188,12 +227,42 @@ export function createContainer(
     queue,
     pms,
     signer: overrides.signer ?? new Signer(config.signingSecret),
+    extraction:
+      overrides.extraction ??
+      (config.llm.anthropic
+        ? new ClaudeExtractionModel({
+            apiKey: config.llm.anthropic.apiKey,
+            model: config.llm.extractionModel,
+          })
+        : new KeywordExtractionModel(new Map(ATTRIBUTES.map((a) => [a.code, a.synonyms])))),
+    embeddings:
+      overrides.embeddings ??
+      (config.llm.embeddings.provider === 'openai'
+        ? new OpenAIEmbedding(config.llm.embeddings.apiKey)
+        : config.llm.embeddings.provider === 'voyage'
+          ? new VoyageEmbedding(config.llm.embeddings.apiKey)
+          : new LocalHashEmbedding()),
   };
 
   return {
     ...adapters,
     config,
     services: createServices(config, adapters),
+    async init() {
+      await db.system(({ taxonomy }) =>
+        taxonomy.upsertDefinitions(
+          ATTRIBUTES.map((a) => ({
+            code: a.code,
+            label: a.label,
+            category: a.category,
+            appliesTo: a.appliesTo,
+            importance: a.importance,
+            valueType: a.valueType,
+            enumValues: a.enumValues,
+          })),
+        ),
+      );
+    },
     async close() {
       await db.close();
     },

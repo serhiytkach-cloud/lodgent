@@ -22,9 +22,13 @@
     "@lodgent/shared": "workspace:*",
     "@lodgent/taxonomy": "workspace:*",
     "aws-jwt-verify": "5.2.1",
+    "cheerio": "1.2.0",
+    "ipaddr.js": "2.5.0",
     "jose": "6.2.12",
     "nodemailer": "10.1.0",
     "pino": "10.4.0",
+    "robots-parser": "3.0.1",
+    "undici": "8.11.2",
     "zod": "4.6.5"
   },
   "devDependencies": {

@@ -41,6 +41,7 @@ export async function createTestApp(
   });
   const mailer = new MemoryMailer();
   const container = createContainer(config, { mailer, name: 'api-test', ...overrides });
+  await container.init();
   const { server, router } = await buildApp(container);
   await server.ready();
 
@@ -83,4 +84,36 @@ export async function createTestApp(
       await database.drop();
     },
   };
+}
+
+/** Runs the Apaleo OAuth dance against the fake server the way a browser would; returns the final redirect. */
+export async function connectApaleo(
+  app: TestApp,
+  fakeUrl: string,
+  token: string,
+  orgId: string,
+  account = 'DEMO',
+): Promise<string> {
+  const start = await app.call('POST', `/v1/orgs/${orgId}/integrations/apaleo/authorize`, { token });
+  if (start.status !== 200) throw new Error(`authorize failed: ${JSON.stringify(start.body)}`);
+  const consent = new URL(start.body.url);
+  const approve = await fetch(
+    `${fakeUrl}/connect/authorize/approve?${new URLSearchParams({
+      redirect_uri: consent.searchParams.get('redirect_uri')!,
+      state: consent.searchParams.get('state')!,
+      account,
+    })}`,
+    { redirect: 'manual' },
+  );
+  const callback = new URL(approve.headers.get('location')!);
+  const res = await app.call('GET', `${callback.pathname}${callback.search}`);
+  if (res.status !== 303) throw new Error(`callback failed: ${JSON.stringify(res.body)}`);
+  return String(res.headers.location);
+}
+
+/** Creates an org owned by a fresh user. */
+export async function newOrg(app: TestApp, name = 'Demo Boutique Hotels') {
+  const owner = await app.login();
+  const org = await app.call('POST', '/v1/orgs', { token: owner.token, body: { name } });
+  return { token: owner.token, email: owner.email, orgId: org.body.id as string };
 }

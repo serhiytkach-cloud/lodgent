@@ -11,6 +11,7 @@ import { Router } from './http/router';
 import { registerAccountRoutes } from './routes/account';
 import { registerIntegrationRoutes } from './routes/integrations';
 import { registerOrganizationRoutes } from './routes/organizations';
+import { registerProfileRoutes } from './routes/profile';
 import { registerPropertyRoutes } from './routes/properties';
 
 declare module 'fastify' {
@@ -80,6 +81,7 @@ export async function buildApp(container: Container): Promise<App> {
   registerOrganizationRoutes(router, container);
   registerPropertyRoutes(router, container);
   registerIntegrationRoutes(router, container);
+  registerProfileRoutes(router, container);
 
   server.get('/healthz', async () => ({ ok: true, service: `${BRAND.slug}-api` }));
   server.get('/readyz', async (_req, reply) => {

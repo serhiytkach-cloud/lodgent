@@ -92,7 +92,8 @@ const EnvSchema = z.object({
   VISIBILITY_DEFAULT_MONTHLY_CAP_CENTS: int(5000),
   ANONYMOUS_RATE_LIMIT_PER_MINUTE: int(30),
   PARTNER_RATE_LIMIT_PER_MINUTE: int(300),
-  CRAWL_ALLOW_PRIVATE_NETWORKS: bool(false),
+  /** Lets the website crawler reach localhost/private networks. Defaults to on outside production (local demo sites). */
+  CRAWL_ALLOW_PRIVATE_NETWORKS: z.preprocess(blank, z.stringbool().optional()),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
 });
@@ -253,7 +254,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       anonymousPerMinute: e.ANONYMOUS_RATE_LIMIT_PER_MINUTE,
       partnerPerMinute: e.PARTNER_RATE_LIMIT_PER_MINUTE,
     },
-    crawler: { allowPrivateNetworks: e.CRAWL_ALLOW_PRIVATE_NETWORKS },
+    crawler: { allowPrivateNetworks: e.CRAWL_ALLOW_PRIVATE_NETWORKS ?? !isProduction },
     signingSecret: e.SIGNING_SECRET,
     otelEndpoint: e.OTEL_EXPORTER_OTLP_ENDPOINT,
   };
@@ -274,6 +275,8 @@ function assertProductionReady(config: AppConfig): void {
   if (config.stripe.webhookSecret === DEV_SECRETS.stripeWebhookSecret)
     problems.push('STRIPE_WEBHOOK_SECRET is not set');
   if (config.stripe.apiBaseUrl) problems.push('STRIPE_API_BASE_URL must be blank in production');
+  if (config.crawler.allowPrivateNetworks)
+    problems.push('CRAWL_ALLOW_PRIVATE_NETWORKS must be off in production');
   if (config.apaleo.clientId === DEV_SECRETS.apaleoClientId) problems.push('APALEO_CLIENT_ID is not set');
   if (config.apaleo.webhookToken === 'dev-apaleo-webhook-token')
     problems.push('APALEO_WEBHOOK_TOKEN uses the dev default');

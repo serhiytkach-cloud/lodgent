@@ -1,5 +1,6 @@
 import type { Tx } from '../client';
 import { offerQuoteRepo, pmsConnectionRepo, policyRepo, ratePlanRepo, roomTypeRepo } from './pms';
+import { attributeAssignmentRepo, crawlRepo, descriptionSuggestionRepo, embeddingRepo } from './profile';
 import {
   auditRepo,
   invitationRepo,
@@ -25,6 +26,10 @@ export function tenantRepos(tx: Tx, orgId: string) {
     ratePlans: ratePlanRepo(tx, orgId),
     policies: policyRepo(tx, orgId),
     offerQuotes: offerQuoteRepo(tx, orgId),
+    attributes: attributeAssignmentRepo(tx, orgId),
+    descriptions: descriptionSuggestionRepo(tx, orgId),
+    embeddings: embeddingRepo(tx, orgId),
+    crawls: crawlRepo(tx, orgId),
   };
 }
 

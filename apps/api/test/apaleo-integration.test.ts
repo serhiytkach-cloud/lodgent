@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { createFakeApaleo, type FakeApaleo } from '@lodgent/apaleo/fake';
 import { addDays, localDateAt } from '@lodgent/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestApp, type TestApp } from './helpers';
+import { connectApaleo, newOrg as createOrg, createTestApp, type TestApp } from './helpers';
 
 let fake: FakeApaleo;
 let app: TestApp;
@@ -29,32 +29,9 @@ afterAll(async () => {
   await fake.app.close();
 });
 
-/** Runs the OAuth dance the way a browser would and returns where the API redirected to. */
-async function connectApaleo(token: string, orgId: string, account = 'DEMO'): Promise<string> {
-  const start = await app.call('POST', `/v1/orgs/${orgId}/integrations/apaleo/authorize`, { token });
-  expect(start.status).toBe(200);
-  const consent = new URL(start.body.url);
-  expect(consent.origin).toBe(fakeUrl);
-  const approve = await fetch(
-    `${fakeUrl}/connect/authorize/approve?${new URLSearchParams({
-      redirect_uri: consent.searchParams.get('redirect_uri')!,
-      state: consent.searchParams.get('state')!,
-      account,
-    })}`,
-    { redirect: 'manual' },
-  );
-  const callback = new URL(approve.headers.get('location')!);
-  expect(callback.pathname).toBe('/v1/integrations/apaleo/callback');
-  const res = await app.call('GET', `${callback.pathname}${callback.search}`);
-  expect(res.status).toBe(303);
-  return String(res.headers.location);
-}
-
-async function newOrg(name: string) {
-  const owner = await app.login();
-  const org = await app.call('POST', '/v1/orgs', { token: owner.token, body: { name } });
-  return { token: owner.token, orgId: org.body.id as string };
-}
+const connect = (token: string, orgId: string, account = 'DEMO') =>
+  connectApaleo(app, fakeUrl, token, orgId, account);
+const newOrg = (name: string) => createOrg(app, name);
 
 describe('Apaleo connection and sync', () => {
   let token: string;
@@ -65,7 +42,7 @@ describe('Apaleo connection and sync', () => {
   });
 
   it('connects through OAuth and stores encrypted tokens', async () => {
-    const location = await connectApaleo(token, orgId);
+    const location = await connect(token, orgId);
     expect(location).toBe(`http://web.test/app/${orgId}/settings/connections?apaleo=connected`);
     const status = await app.call('GET', `/v1/orgs/${orgId}/integrations/apaleo`, { token });
     expect(status.body).toMatchObject({ connected: true, accountCode: 'DEMO', status: 'active' });
@@ -208,8 +185,10 @@ describe('Apaleo connection and sync', () => {
 
   it('refuses to connect the same Apaleo account to a second organization', async () => {
     const other = await newOrg('Copycat Hotels');
-    const location = await connectApaleo(other.token, other.orgId);
-    expect(location).toBe('http://web.test/app?apaleo=pms_account_in_use');
+    const location = await connect(other.token, other.orgId);
+    expect(location).toBe(
+      `http://web.test/app/${other.orgId}/settings/connections?apaleo=pms_account_in_use`,
+    );
   });
 
   it('disconnects and revokes access', async () => {
@@ -226,6 +205,6 @@ describe('OAuth state', () => {
   it('rejects a forged or expired state', async () => {
     const res = await app.call('GET', '/v1/integrations/apaleo/callback?code=x&state=forged.state');
     expect(res.status).toBe(303);
-    expect(res.headers.location).toBe('http://web.test/app?apaleo=invalid_request');
+    expect(res.headers.location).toBe('http://web.test/app?apaleo=expired');
   });
 });

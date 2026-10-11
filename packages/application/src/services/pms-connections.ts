@@ -1,6 +1,7 @@
 import {
   type Clock,
   can,
+  DomainError,
   ForbiddenError,
   type KeyManagement,
   NotFoundError,
@@ -82,21 +83,41 @@ export class PmsConnectionService {
    * Completes the OAuth flow from the provider's redirect. Returns the dashboard URL to send the
    * browser to. Membership and permission are re-checked: the state only proves who started it.
    */
-  async completeAuthorization(params: { code?: string; state?: string; error?: string }): Promise<string> {
-    const { db, signer, clock, kms, provider } = this.deps;
+  async completeAuthorization(params: {
+    code?: string;
+    state?: string;
+    error?: string;
+  }): Promise<{ redirectTo: string; error?: unknown }> {
+    const { signer, clock } = this.deps;
     const raw = params.state ? signer.verify('oauth-state', params.state, clock.now()) : null;
     const parsed = OAuthState.safeParse(raw);
-    if (!parsed.success)
-      throw new ValidationError('The connection link expired or was tampered with. Start again.');
+    if (!parsed.success) {
+      // Without a valid state we don't know the organization: send the browser to the dashboard root.
+      return {
+        redirectTo: `${this.deps.webBaseUrl}/app?apaleo=expired`,
+        error: new ValidationError('Invalid OAuth state'),
+      };
+    }
     const { orgId, userId } = parsed.data;
     const back = (result: string) =>
       `${this.deps.webBaseUrl}/app/${orgId}/settings/connections?apaleo=${result}`;
-    if (params.error || !params.code) return back(params.error === 'access_denied' ? 'denied' : 'error');
+    if (params.error || !params.code)
+      return { redirectTo: back(params.error === 'access_denied' ? 'denied' : 'error') };
+    try {
+      await this.finishConnection(orgId, userId, params.code);
+      return { redirectTo: back('connected') };
+    } catch (error) {
+      return { redirectTo: back(error instanceof DomainError ? error.code : 'error'), error };
+    }
+  }
+
+  private async finishConnection(orgId: string, userId: string, code: string): Promise<void> {
+    const { db, kms, provider } = this.deps;
 
     const membership = await db.system(({ identity }) => identity.membership(userId, orgId));
     if (!membership || !can(membership.role, 'pms.manage')) throw new ForbiddenError();
 
-    const tokens = await provider.exchangeCode(params.code, this.deps.redirectUri);
+    const tokens = await provider.exchangeCode(code, this.deps.redirectUri);
     const account = await provider.client(async () => tokens.accessToken).getAccount();
 
     // One Apaleo account belongs to one organization.
@@ -142,7 +163,6 @@ export class PmsConnectionService {
       });
     });
     this.tokenCache.clear();
-    return back('connected');
   }
 
   async requestSync(ctx: OrgContext): Promise<void> {

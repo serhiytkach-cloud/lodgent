@@ -8,6 +8,7 @@ import {
   type FakeRatePlan,
   type FakeUnitGroup,
 } from './fixtures';
+import { FAKE_SITES, FAKE_SITES_ROBOTS, renderSitePage } from './websites';
 
 /**
  * An in-memory stand-in for Apaleo (identity, core API and webhook API) used by tests and local
@@ -679,6 +680,20 @@ export function createFakeApaleo(options: FakeApaleoOptions = {}) {
   app.get('/_fake/reservations', async () => ({ reservations: [...state.reservations.values()] }));
   app.get('/_fake/health', async () => ({ ok: true }));
 
+  // ---- Demo hotel websites (website import) ----------------------------------------------
+  app.get('/robots.txt', async (_req, reply) => reply.type('text/plain').send(FAKE_SITES_ROBOTS));
+  app.get('/sites/:site/*', async (req, reply) => {
+    const { site: code, '*': rest } = req.params as { site: string; '*': string };
+    const site = FAKE_SITES.find((s) => s.code === code);
+    const path = `/${rest}`.replace(/\/?$/, '/');
+    const page = site?.pages.find((p) => p.path === path);
+    if (!site || !page) return reply.status(404).type('text/html').send('<h1>Not found</h1>');
+    return reply.type('text/html; charset=utf-8').send(renderSitePage(site, page));
+  });
+  app.get('/sites/:site', async (req, reply) =>
+    reply.redirect(`/sites/${(req.params as { site: string }).site}/`),
+  );
+
   return {
     app,
     state,
@@ -692,3 +707,4 @@ export function createFakeApaleo(options: FakeApaleoOptions = {}) {
 }
 
 export type FakeApaleo = ReturnType<typeof createFakeApaleo>;
+export { FAKE_SITES, type FakeSite } from './websites';

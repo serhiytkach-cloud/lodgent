@@ -8,6 +8,13 @@ export type {
   RatePlanRow,
   RoomTypeRow,
 } from './repositories/pms';
+export type {
+  AttributeAssignmentRow,
+  DescriptionSuggestionRow,
+  SuggestionInput,
+  WebsiteCrawlRow,
+} from './repositories/profile';
+export { scopeKeyFor } from './repositories/profile';
 export type { JobRow, OutboxRow } from './repositories/queue';
 export type { SystemRepos } from './repositories/system';
 export type {

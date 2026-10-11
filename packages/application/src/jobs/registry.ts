@@ -11,6 +11,8 @@ export interface JobContext {
 export type JobHandler = (payload: Record<string, unknown>, ctx: JobContext) => Promise<void>;
 
 const OrgPayload = z.object({ orgId: z.uuid() });
+const PropertyPayload = z.object({ orgId: z.uuid(), propertyId: z.uuid() });
+const CrawlPayload = z.object({ orgId: z.uuid(), crawlId: z.uuid() });
 const ReservationChanged = z.object({
   orgId: z.uuid(),
   pmsReservationId: z.string(),
@@ -52,6 +54,18 @@ export function createJobHandlers(container: Container): Record<string, JobHandl
       const client = await services.pmsConnections.clientFor(orgId);
       const reservation = await client.getReservation(pmsReservationId);
       ctx.logger.info({ orgId, pmsReservationId, status: reservation?.status }, 'PMS reservation changed');
+    },
+    'profile.map-pms': async (payload) => {
+      const { orgId, propertyId } = PropertyPayload.parse(payload);
+      await services.catalog.mapPmsAttributes(orgId, propertyId);
+    },
+    'profile.embed': async (payload) => {
+      const { orgId, propertyId } = PropertyPayload.parse(payload);
+      await services.catalog.refreshEmbeddings(orgId, propertyId);
+    },
+    'website.crawl': async (payload) => {
+      const { orgId, crawlId } = CrawlPayload.parse(payload);
+      await services.websiteImport.run(orgId, crawlId);
     },
     'offers.cleanup': async () => {
       await db.system(({ pms }) =>

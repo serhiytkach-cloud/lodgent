@@ -38,12 +38,14 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [x] Dashboard: Connections page (connect/sync/disconnect), Rooms & rates with per-rate-plan agent opt-in and live offer preview
 
 ### M3: Attribute profile
-- [ ] Taxonomy package with ~150 seed attributes
-- [ ] Polite website crawl (robots.txt, ≤30 pages, same domain, SSRF-safe)
-- [ ] Claude structured-output extraction with evidence → `suggested`
-- [ ] PMS → attribute mapping
-- [ ] Dashboard editor: bulk approve/reject/edit, provenance badges, completeness score with prioritized gaps
-- [ ] Publish step: schema.org JSON-LD snippet + public profile page
+- [x] Taxonomy package with ~150 seed attributes (153 across 11 categories, synonyms, schema.org mapping)
+- [x] Polite website crawl (robots.txt, ≤30 pages, same domain, SSRF-safe)
+- [x] Claude structured-output extraction with evidence → `suggested` (quotes verified against the page; offline keyword matcher without a key)
+- [x] PMS → attribute mapping
+- [x] Dashboard editor: bulk approve/reject/edit, provenance badges, completeness score with prioritized gaps
+- [x] Publish step: schema.org JSON-LD snippet + public profile page
+- [x] Demo hotel websites on the fake server (`/sites/lis|see|chs/`) for local imports
+- [x] Embeddings (pgvector, 512 dims) refreshed on publish and on profile changes
 
 ### M4: Agent surface (MCP + REST)
 - [ ] MCP server at `/mcp` (Streamable HTTP): `search_hotels`, `get_hotel`, `get_offers`, `create_hold`, `get_hold_status`

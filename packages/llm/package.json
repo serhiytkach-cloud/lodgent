@@ -11,8 +11,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@lodgent/core": "workspace:*",
     "@lodgent/shared": "workspace:*",
+    "openai": "7.32.0",
     "zod": "4.6.5"
   },
   "devDependencies": {

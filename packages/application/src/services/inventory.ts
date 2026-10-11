@@ -11,11 +11,9 @@ export class InventoryService {
     return this.db.tenant(ctx.orgId, async (r) => {
       const property = await r.properties.get(propertyId);
       if (!property) throw new NotFoundError('Property');
-      const [roomTypes, ratePlans, policies] = await Promise.all([
-        r.roomTypes.listForProperty(propertyId),
-        r.ratePlans.listForProperty(propertyId),
-        r.policies.listForProperty(propertyId),
-      ]);
+      const roomTypes = await r.roomTypes.listForProperty(propertyId);
+      const ratePlans = await r.ratePlans.listForProperty(propertyId);
+      const policies = await r.policies.listForProperty(propertyId);
       const policyById = new Map(policies.map((p) => [p.id, p]));
       return {
         roomTypes: roomTypes.map((rt) => ({

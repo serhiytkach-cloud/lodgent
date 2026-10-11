@@ -41,7 +41,8 @@ Every external dependency has a local implementation. A fresh clone runs end to 
 | Queue | SQS + EventBridge Scheduler | Postgres-backed queue (`SKIP LOCKED`) + in-process scheduler |
 | Token encryption | KMS envelope encryption | local AES-256-GCM master key |
 | Email | SES | SMTP → Mailpit |
-| LLMs | Anthropic (extraction), Anthropic/OpenAI/Gemini/Perplexity (visibility) | deterministic fixture providers |
+| LLMs | Anthropic (extraction), Anthropic/OpenAI/Gemini/Perplexity (visibility) | offline keyword extractor; deterministic fixture providers |
+| Hotel websites | the hotel's real site | demo sites served by the fake Apaleo server at `/sites/lis/`, `/sites/see/`, `/sites/chs/` |
 | Embeddings | OpenAI or Voyage (512 dims) | deterministic local hashing embedder |
 
 ## Data and tenancy
@@ -64,8 +65,8 @@ Every external dependency has a local implementation. A fresh clone runs end to 
    Pay at hotel: a SetupIntent on the connected account, then the reservation is created. The fee accrues to the ledger and is invoiced monthly.
 6. The confirmation page and email show the Apaleo confirmation number. Finalization is idempotent: the client callback and the Stripe webhook both trigger it, and a reconciliation job sweeps stuck states.
 
-**Profile**
-PMS sync and the website crawl + Claude extraction produce `suggested` attribute assignments with evidence. The hotel reviews them, and publishing exposes the property to agents. Publishing also generates schema.org JSON-LD and a public profile page.
+**Profile** (ADR 0007)
+PMS sync (job `profile.map-pms`) and the website import (job `website.crawl`: polite crawl, Claude extraction, quote verification) produce `suggested` attribute assignments, one row per source, each with evidence. The hotel approves, rejects or sets values in the editor; the effective value is the latest approved one, and the hotel's own value wins ties. Publishing checks readiness, exposes the property to agents, computes its embeddings (job `profile.embed`, re-run on every later change) and generates schema.org JSON-LD and the public profile page `/hotels/[slug]`.
 
 **Visibility**
 The worker runs target queries weekly across the configured LLM providers (web-search modes) within each org's cost cap. It parses mentions, rank, competitors and citations, and the dashboard shows share of voice and recommended fixes.

@@ -26,6 +26,8 @@ const MESSAGES: Record<string, { variant: 'success' | 'error' | 'warning'; text:
   },
   denied: { variant: 'warning', text: 'You declined access in Apaleo. Nothing was connected.' },
   error: { variant: 'error', text: 'Connecting Apaleo failed. Please try again.' },
+  expired: { variant: 'error', text: 'The connection link expired. Please start again.' },
+  forbidden: { variant: 'error', text: 'Only owners and admins can connect Apaleo.' },
   pms_account_in_use: {
     variant: 'error',
     text: 'That Apaleo account is already connected to another organization.',
@@ -46,7 +48,7 @@ export default async function ConnectionsPage({
     api<ApaleoStatus>(`/v1/orgs/${orgId}/integrations/apaleo`),
   ]);
   const canManage = org.role !== 'viewer';
-  const message = query.apaleo ? MESSAGES[query.apaleo] : undefined;
+  const message = query.apaleo ? (MESSAGES[query.apaleo] ?? MESSAGES.error) : undefined;
 
   return (
     <>

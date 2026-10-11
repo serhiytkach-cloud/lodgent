@@ -4,6 +4,7 @@ import { buildApp } from './app';
 loadDotEnv();
 const config = loadConfig();
 const container = createContainer(config, { name: 'api' });
+await container.init();
 const { server } = await buildApp(container);
 
 await server.listen({ port: config.apiPort, host: '0.0.0.0' });

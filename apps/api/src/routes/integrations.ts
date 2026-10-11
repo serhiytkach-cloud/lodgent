@@ -1,5 +1,4 @@
 import type { Container } from '@lodgent/application';
-import { DomainError } from '@lodgent/core';
 import { z } from 'zod';
 import { ParamsWithOrg, type Router } from '../http/router';
 
@@ -60,14 +59,9 @@ export function registerIntegrationRoutes(router: Router, container: Container):
     }),
     response: null,
     handler: async ({ query, reply, req }) => {
-      try {
-        const target = await pmsConnections.completeAuthorization(query);
-        await reply.redirect(target, 303);
-      } catch (error) {
-        req.log.warn({ err: error }, 'Apaleo OAuth callback failed');
-        const reason = error instanceof DomainError ? error.code : 'error';
-        await reply.redirect(`${container.config.webBaseUrl}/app?apaleo=${encodeURIComponent(reason)}`, 303);
-      }
+      const { redirectTo, error } = await pmsConnections.completeAuthorization(query);
+      if (error) req.log.warn({ err: error }, 'Apaleo OAuth callback failed');
+      await reply.redirect(redirectTo, 303);
     },
   });
 
