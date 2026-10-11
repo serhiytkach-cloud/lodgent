@@ -13,6 +13,7 @@ export type JobHandler = (payload: Record<string, unknown>, ctx: JobContext) => 
 const OrgPayload = z.object({ orgId: z.uuid() });
 const PropertyPayload = z.object({ orgId: z.uuid(), propertyId: z.uuid() });
 const CrawlPayload = z.object({ orgId: z.uuid(), crawlId: z.uuid() });
+const BookingPayload = z.object({ orgId: z.uuid(), bookingId: z.uuid() });
 const ReservationChanged = z.object({
   orgId: z.uuid(),
   pmsReservationId: z.string(),
@@ -54,6 +55,27 @@ export function createJobHandlers(container: Container): Record<string, JobHandl
       const client = await services.pmsConnections.clientFor(orgId);
       const reservation = await client.getReservation(pmsReservationId);
       ctx.logger.info({ orgId, pmsReservationId, status: reservation?.status }, 'PMS reservation changed');
+      await services.checkout.applyReservationChange(orgId, pmsReservationId, reservation);
+    },
+    'checkout.finalize': async (payload) => {
+      const { orgId, bookingId } = BookingPayload.parse(payload);
+      await services.checkout.finalize(orgId, bookingId);
+    },
+    'checkout.reconcile': async (_payload, ctx) => {
+      const result = await services.checkout.reconcile();
+      if (result.finalized + result.expired > 0) ctx.logger.info(result, 'checkout reconciliation');
+    },
+    'booking.record-folio-payment': async (payload) => {
+      const { orgId, bookingId } = BookingPayload.parse(payload);
+      await services.checkout.retryFolioPayment(orgId, bookingId);
+    },
+    'payments.account-updated': async (payload) => {
+      const { accountId } = z.object({ accountId: z.string().min(1) }).parse(payload);
+      await services.paymentAccounts.handleAccountUpdated(accountId);
+    },
+    'privacy.retention': async (_payload, ctx) => {
+      const redacted = await services.checkout.redactExpiredGuestData();
+      if (redacted > 0) ctx.logger.info({ redacted }, 'guest data redacted');
     },
     'profile.map-pms': async (payload) => {
       const { orgId, propertyId } = PropertyPayload.parse(payload);

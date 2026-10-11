@@ -29,6 +29,18 @@ export const SCHEDULES: Schedule[] = [
     job: { type: 'holds.expire', payload: {} },
   },
   {
+    name: 'checkout-reconcile',
+    everyMinutes: 5,
+    expression: 'rate(5 minutes)',
+    job: { type: 'checkout.reconcile', payload: {} },
+  },
+  {
+    name: 'privacy-retention',
+    everyMinutes: 1440,
+    expression: 'cron(30 3 * * ? *)',
+    job: { type: 'privacy.retention', payload: {} },
+  },
+  {
     name: 'offers-cleanup',
     everyMinutes: 60,
     expression: 'rate(1 hour)',

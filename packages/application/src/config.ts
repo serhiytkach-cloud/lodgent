@@ -67,6 +67,8 @@ const EnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().default(DEV_SECRETS.stripeSecretKey),
   STRIPE_PUBLISHABLE_KEY: z.string().default(DEV_SECRETS.stripePublishableKey),
   STRIPE_WEBHOOK_SECRET: z.string().default(DEV_SECRETS.stripeWebhookSecret),
+  /** Secret of the Connect webhook endpoint (events from hotels' accounts), if it differs. */
+  STRIPE_CONNECT_WEBHOOK_SECRET: optionalString,
   /** Points the Stripe SDK at the local fake Stripe server. Leave blank for api.stripe.com. */
   STRIPE_API_BASE_URL: optionalUrl,
 
@@ -127,7 +129,12 @@ export interface AppConfig {
     scopes: string[] | null;
     channelCode: 'Ibe' | 'Direct';
   };
-  stripe: { secretKey: string; publishableKey: string; webhookSecret: string; apiBaseUrl?: string };
+  stripe: {
+    secretKey: string;
+    publishableKey: string;
+    webhookSecrets: string[];
+    apiBaseUrl?: string;
+  };
   llm: {
     anthropic?: { apiKey: string; model: string };
     openai?: { apiKey: string; model: string };
@@ -223,8 +230,14 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     stripe: {
       secretKey: e.STRIPE_SECRET_KEY,
       publishableKey: e.STRIPE_PUBLISHABLE_KEY,
-      webhookSecret: e.STRIPE_WEBHOOK_SECRET,
-      apiBaseUrl: e.STRIPE_API_BASE_URL,
+      webhookSecrets: [
+        e.STRIPE_WEBHOOK_SECRET,
+        ...(e.STRIPE_CONNECT_WEBHOOK_SECRET ? [e.STRIPE_CONNECT_WEBHOOK_SECRET] : []),
+      ],
+      // With the development placeholder key, talk to the local fake Stripe; a real key talks to Stripe.
+      apiBaseUrl:
+        e.STRIPE_API_BASE_URL ??
+        (e.STRIPE_SECRET_KEY === DEV_SECRETS.stripeSecretKey ? 'http://localhost:4020' : undefined),
     },
     llm: {
       anthropic: e.ANTHROPIC_API_KEY ? { apiKey: e.ANTHROPIC_API_KEY, model: e.ANTHROPIC_MODEL } : undefined,
@@ -272,7 +285,7 @@ function assertProductionReady(config: AppConfig): void {
   if (config.signingSecret === DEV_SECRETS.signingSecret)
     problems.push('SIGNING_SECRET uses the dev default');
   if (config.stripe.secretKey === DEV_SECRETS.stripeSecretKey) problems.push('STRIPE_SECRET_KEY is not set');
-  if (config.stripe.webhookSecret === DEV_SECRETS.stripeWebhookSecret)
+  if (config.stripe.webhookSecrets.includes(DEV_SECRETS.stripeWebhookSecret))
     problems.push('STRIPE_WEBHOOK_SECRET is not set');
   if (config.stripe.apiBaseUrl) problems.push('STRIPE_API_BASE_URL must be blank in production');
   if (config.crawler.allowPrivateNetworks)

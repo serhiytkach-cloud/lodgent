@@ -6,6 +6,7 @@ export * from './permissions';
 export * from './ports/ai';
 export type * from './ports/identity';
 export * from './ports/messaging';
+export type * from './ports/payments';
 export * from './ports/pms';
 export * from './pricing';
 export * from './profile';

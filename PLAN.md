@@ -56,12 +56,13 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [x] Holds (TTL, live re-check, per-room-type locking, signed checkout link) and the hold-expiry job
 
 ### M5: Holds, checkout, payments, reservations
-- [ ] Hold TTL (default 15 min); holds live in Lodgent; offer re-verified at payment time
-- [ ] Hosted mobile-first checkout `/checkout/[token]` with all-in pricing and Payment Element on the hotel's connected account
-- [ ] Prepaid: manual-capture PaymentIntent → Apaleo reservation → capture (cancel on failure); `application_fee_amount`
-- [ ] Pay-at-hotel: SetupIntent on the connected account; fee accrues to ledger
-- [ ] Idempotency keys, transactional outbox, webhook signature verification, reconciliation job
-- [ ] Confirmation page + email; Stripe Connect onboarding (ADR)
+- [x] Hold TTL (default 15 min); holds live in Lodgent; offer re-verified at payment time
+- [x] Hosted mobile-first checkout `/checkout/[token]` with all-in pricing and Payment Element on the hotel's connected account (simulated panel with the local fake Stripe)
+- [x] Prepaid: manual-capture PaymentIntent → Apaleo reservation → capture (cancel on failure); `application_fee_amount`; folio payment posted
+- [x] Pay-at-hotel: SetupIntent on the connected account; fee accrues to ledger
+- [x] Idempotency keys, transactional outbox, webhook signature verification, reconciliation job
+- [x] Confirmation page + email; Stripe Connect onboarding (ADR 0009)
+- [x] Fake Stripe server driven by the real SDK; card-data request guard; PMS reservation changes mirrored; guest-data retention job
 
 ### M6: AI visibility monitor
 - [ ] Auto-suggested target queries (10–20 per property), editable

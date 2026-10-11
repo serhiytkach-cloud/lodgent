@@ -562,15 +562,17 @@ export class AgentService {
     const { db, clock } = this.deps;
     const owner = await db.system(({ holds }) => holds.owner(holdId));
     if (!owner) throw new NotFoundError('Hold');
-    const { hold, property } = await db.tenant(owner.organizationId, async (r) => {
+    const { hold, property, booking } = await db.tenant(owner.organizationId, async (r) => {
       let row = await r.holds.get(holdId);
-      if (row?.status === 'active' && row.expiresAt <= clock.now()) {
+      const booking = await r.bookings.byHold(holdId);
+      // A guest who is mid-payment keeps the hold; the reconciliation job closes abandoned ones.
+      if (row?.status === 'active' && row.expiresAt <= clock.now() && !booking) {
         row = (await r.holds.setStatus(holdId, 'expired', 'Checkout not completed in time')) ?? row;
       }
-      return { hold: row, property: await r.properties.get(owner.propertyId) };
+      return { hold: row, property: await r.properties.get(owner.propertyId), booking };
     });
     if (!hold || !property) throw new NotFoundError('Hold');
-    return this.toHoldDto(hold, property);
+    return this.toHoldDto(hold, property, booking?.confirmationNumber ?? null);
   }
 
   /** Signed, unguessable checkout link for a hold. */
@@ -590,7 +592,7 @@ export class AgentService {
     return typeof payload?.h === 'string' ? payload.h : null;
   }
 
-  private toHoldDto(hold: HoldRow, property: PropertyRow): HoldDto {
+  private toHoldDto(hold: HoldRow, property: PropertyRow, confirmationNumber: string | null = null): HoldDto {
     const total = { amount: hold.totalAmount, currency: hold.currency };
     const due = { amount: hold.dueNowAmount, currency: hold.currency };
     const active = hold.status === 'active';
@@ -610,7 +612,7 @@ export class AgentService {
         hold.paymentMode === 'prepaid' ? 'pay' : 'guarantee the booking with a card'
       } on a secure page before ${hold.expiresAt.toISOString()}. Never collect card details yourself.`,
       processing: 'Payment received; the hotel reservation is being created. Check again in a few seconds.',
-      confirmed: 'Booked. The guest receives a confirmation email from the hotel.',
+      confirmed: `Booked${confirmationNumber ? `, confirmation number ${confirmationNumber}` : ''}. The guest receives a confirmation email.`,
       failed: `The booking could not be completed${hold.statusReason ? `: ${hold.statusReason}` : ''}. Any payment authorization was released. Search again for alternatives.`,
       expired:
         'The hold expired before checkout was completed. Call get_offers again if the traveller still wants to book.',
@@ -632,7 +634,7 @@ export class AgentService {
       total: toDisplayMoney(total),
       dueNow: toDisplayMoney(due),
       dueAtHotel: toDisplayMoney({ amount: total.amount - due.amount, currency: total.currency }),
-      booking: null,
+      booking: hold.status === 'confirmed' && confirmationNumber ? { confirmationNumber } : null,
       nextStep,
     };
   }

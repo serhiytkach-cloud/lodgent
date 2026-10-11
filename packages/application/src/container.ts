@@ -7,6 +7,7 @@ import {
   type JobQueue,
   type KeyManagement,
   type Mailer,
+  type PaymentProvider,
   type PmsProvider,
   systemClock,
 } from '@lodgent/core';
@@ -18,6 +19,7 @@ import {
   OpenAIEmbedding,
   VoyageEmbedding,
 } from '@lodgent/llm';
+import { StripePaymentProvider } from '@lodgent/payments';
 import { BRAND } from '@lodgent/shared';
 import { ATTRIBUTES } from '@lodgent/taxonomy';
 import pino, { type Logger } from 'pino';
@@ -34,11 +36,14 @@ import { AgentClientService } from './services/agent-clients';
 import { AgentLog } from './services/agent-log';
 import { AuditService } from './services/audit';
 import { CatalogService } from './services/catalog';
+import { CheckoutService } from './services/checkout';
 import { InventoryService } from './services/inventory';
 import { MemberService } from './services/members';
 import { OfferService } from './services/offers';
 import { OrganizationService } from './services/organizations';
 import { OutboxDispatcher } from './services/outbox-dispatcher';
+import { PaymentAccountService } from './services/payment-accounts';
+import { PaymentWebhookService } from './services/payment-webhooks';
 import { PmsConnectionService } from './services/pms-connections';
 import { PmsSyncService } from './services/pms-sync';
 import { PmsWebhookService } from './services/pms-webhooks';
@@ -57,6 +62,7 @@ export interface Adapters {
   mailer: Mailer;
   queue: JobQueue;
   pms: PmsProvider;
+  payments: PaymentProvider;
   signer: Signer;
   extraction: ExtractionModel;
   embeddings: EmbeddingModel;
@@ -94,10 +100,39 @@ function createServices(config: AppConfig, a: Adapters) {
     cacheTtlSeconds: config.business.offerCacheTtlSeconds,
     validityMinutes: config.business.offerValidityMinutes,
   });
+  const checkout = new CheckoutService({
+    db: a.db,
+    clock: a.clock,
+    payments: a.payments,
+    offers,
+    connections: pmsConnections,
+    signer: a.signer,
+    logger: a.logger,
+    webBaseUrl: config.webBaseUrl,
+    simulatorUrl: config.stripe.apiBaseUrl ?? null,
+    piiRetentionDays: config.business.piiRetentionDays,
+  });
   return {
     pmsConnections,
     catalog,
     offers,
+    paymentAccounts: new PaymentAccountService({
+      db: a.db,
+      clock: a.clock,
+      payments: a.payments,
+      logger: a.logger,
+      webBaseUrl: config.webBaseUrl,
+      defaultFeeBps: config.business.defaultFeeBps,
+    }),
+    checkout,
+    paymentWebhooks: new PaymentWebhookService({
+      db: a.db,
+      clock: a.clock,
+      payments: a.payments,
+      queue: a.queue,
+      checkout,
+      logger: a.logger,
+    }),
     agent: new AgentService({
       db: a.db,
       clock: a.clock,
@@ -242,6 +277,15 @@ export function createContainer(
     mailer,
     queue,
     pms,
+    payments:
+      overrides.payments ??
+      new StripePaymentProvider({
+        secretKey: config.stripe.secretKey,
+        publishableKey: config.stripe.publishableKey,
+        webhookSecrets: config.stripe.webhookSecrets,
+        apiBaseUrl: config.stripe.apiBaseUrl,
+        simulated: !!config.stripe.apiBaseUrl,
+      }),
     signer: overrides.signer ?? new Signer(config.signingSecret),
     extraction:
       overrides.extraction ??

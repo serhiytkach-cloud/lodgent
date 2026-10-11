@@ -5,12 +5,14 @@ import rateLimit from '@fastify/rate-limit';
 import type { Container } from '@lodgent/application';
 import { BRAND } from '@lodgent/shared';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import { registerCardDataGuard } from './http/card-guard';
 import { registerErrorHandler } from './http/errors';
 import { buildOpenApi } from './http/openapi';
 import { Router } from './http/router';
 import { registerMcpEndpoint } from './mcp/server';
 import { registerAccountRoutes } from './routes/account';
 import { registerAgentRoutes } from './routes/agent';
+import { registerCheckoutRoutes } from './routes/checkout';
 import { registerIntegrationRoutes } from './routes/integrations';
 import { registerOrganizationRoutes } from './routes/organizations';
 import { registerProfileRoutes } from './routes/profile';
@@ -38,6 +40,8 @@ export async function buildApp(container: Container): Promise<App> {
     // Behind the ALB in production: trust exactly one proxy hop for the client IP (rate limits, logs).
     trustProxy: config.isProduction ? (_address: string, hop: number) => hop === 0 : false,
     bodyLimit: 1024 * 1024,
+    // Signed checkout tokens travel as a path segment (~120 chars).
+    routerOptions: { maxParamLength: 600 },
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
   });
@@ -73,6 +77,7 @@ export async function buildApp(container: Container): Promise<App> {
   });
   await server.register(rateLimit, { global: false });
   registerErrorHandler(server);
+  registerCardDataGuard(server);
 
   server.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
@@ -85,6 +90,7 @@ export async function buildApp(container: Container): Promise<App> {
   registerIntegrationRoutes(router, container);
   registerProfileRoutes(router, container);
   registerAgentRoutes(router, container);
+  registerCheckoutRoutes(router, container);
   registerMcpEndpoint(server, container);
 
   server.get('/healthz', async () => ({ ok: true, service: `${BRAND.slug}-api` }));

@@ -54,7 +54,8 @@ export interface FakeApaleoState {
     { id: string; account: string; endpointUrl: string; events: string[]; propertyIds: string[] }
   >;
   webhookDeliveries: { url: string; body: unknown; status: number | null }[];
-  failNext: Map<string, number>;
+  /** Operation → status to return and how many more times. */
+  failNext: Map<string, { status: number; times: number }>;
   requests: { method: string; url: string; idempotencyKey?: string }[];
 }
 
@@ -104,10 +105,10 @@ export function createFakeApaleo(options: FakeApaleoOptions = {}) {
     );
 
   function failIfRequested(operation: string, reply: FastifyReply): boolean {
-    const status = state.failNext.get(operation);
-    if (status === undefined) return false;
-    state.failNext.delete(operation);
-    reply.status(status).send({ messages: [`Simulated ${status} for ${operation}`] });
+    const failure = state.failNext.get(operation);
+    if (!failure) return false;
+    if (--failure.times <= 0) state.failNext.delete(operation);
+    reply.status(failure.status).send({ messages: [`Simulated ${failure.status} for ${operation}`] });
     return true;
   }
 
@@ -664,8 +665,12 @@ export function createFakeApaleo(options: FakeApaleoOptions = {}) {
 
   // ---- Test controls -------------------------------------------------------------------
   app.post('/_fake/fail-next', async (req) => {
-    const { operation, status } = req.body as { operation: string; status?: number };
-    state.failNext.set(operation, status ?? 500);
+    const { operation, status, times } = req.body as { operation: string; status?: number; times?: number };
+    state.failNext.set(operation, { status: status ?? 500, times: times ?? 1 });
+    return { ok: true };
+  });
+  app.post('/_fake/reset-failures', async () => {
+    state.failNext.clear();
     return { ok: true };
   });
   app.post('/_fake/reset', async () => {

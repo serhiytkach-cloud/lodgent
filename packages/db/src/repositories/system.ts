@@ -1,6 +1,6 @@
 import type { Tx } from '../client';
 import { agentClientRepo, agentLogRepo } from './agents';
-import { holdSystemRepo } from './bookings';
+import { bookingSystemRepo, holdSystemRepo } from './bookings';
 import { catalogRepo } from './catalog';
 import { identityRepo } from './identity';
 import { pmsSystemRepo } from './pms';
@@ -15,6 +15,7 @@ export function systemRepos(tx: Tx) {
     agentClients: agentClientRepo(tx),
     agentLog: agentLogRepo(tx),
     holds: holdSystemRepo(tx),
+    bookings: bookingSystemRepo(tx),
     catalog: catalogRepo(tx),
     pms: pmsSystemRepo(tx),
     taxonomy: taxonomyRepo(tx),

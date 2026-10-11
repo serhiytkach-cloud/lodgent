@@ -20,3 +20,13 @@ export async function disconnectApaleo(orgId: string): Promise<void> {
   await api(`/v1/orgs/${orgId}/integrations/apaleo`, { method: 'DELETE' });
   revalidatePath(`/app/${orgId}/settings/connections`);
 }
+
+export async function connectStripe(orgId: string): Promise<void> {
+  const { url } = await api<{ url: string }>(`/v1/orgs/${orgId}/payments/onboarding`, { method: 'POST' });
+  redirect(url);
+}
+
+export async function refreshStripe(orgId: string): Promise<void> {
+  await api(`/v1/orgs/${orgId}/payments/refresh`, { method: 'POST' });
+  revalidatePath(`/app/${orgId}/settings/connections`);
+}

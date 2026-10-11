@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@lodgent/apaleo": "workspace:*",
+    "@lodgent/payments": "workspace:*",
     "@modelcontextprotocol/client": "2.3.1",
     "@testcontainers/postgresql": "12.2.0",
     "@types/node": "^22.19.0",

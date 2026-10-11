@@ -71,6 +71,20 @@
       "when": 1791694072419,
       "tag": "0009_agents_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791695036926,
+      "tag": "0010_bookings",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791695037757,
+      "tag": "0011_bookings_rls",
+      "breakpoints": true
     }
   ]
 }

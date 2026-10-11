@@ -14,6 +14,8 @@
   "dependencies": {
     "@lodgent/shared": "workspace:*",
     "@radix-ui/react-slot": "1.4.0",
+    "@stripe/react-stripe-js": "7.0.0",
+    "@stripe/stripe-js": "10.0.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.55.0",

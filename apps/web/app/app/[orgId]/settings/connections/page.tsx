@@ -1,11 +1,12 @@
-import { CheckCircle2, PlugZap, RefreshCw } from 'lucide-react';
+import { BRAND, type PaymentAccountDto } from '@lodgent/shared';
+import { CreditCard, PlugZap, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, Badge, PageHeader } from '@/components/ui/misc';
 import { api } from '@/lib/api';
 import type { Organization } from '@/lib/types';
 import { formatDateTime } from '@/lib/utils';
-import { connectApaleo, disconnectApaleo, syncApaleo } from './actions';
+import { connectApaleo, connectStripe, disconnectApaleo, refreshStripe, syncApaleo } from './actions';
 
 interface ApaleoStatus {
   connected: boolean;
@@ -39,14 +40,20 @@ export default async function ConnectionsPage({
   searchParams,
 }: {
   params: Promise<{ orgId: string }>;
-  searchParams: Promise<{ apaleo?: string; welcome?: string }>;
+  searchParams: Promise<{ apaleo?: string; welcome?: string; stripe?: string }>;
 }) {
   const { orgId } = await params;
   const query = await searchParams;
-  const [org, apaleo] = await Promise.all([
+  // Coming back from Stripe's hosted onboarding: read the account's new state first.
+  if (query.stripe === 'return') {
+    await api(`/v1/orgs/${orgId}/payments/refresh`, { method: 'POST' }).catch(() => undefined);
+  }
+  const [org, apaleo, stripe] = await Promise.all([
     api<Organization>(`/v1/orgs/${orgId}`),
     api<ApaleoStatus>(`/v1/orgs/${orgId}/integrations/apaleo`),
+    api<PaymentAccountDto>(`/v1/orgs/${orgId}/payments`),
   ]);
+  const isOwner = org.role === 'owner';
   const canManage = org.role !== 'viewer';
   const message = query.apaleo ? (MESSAGES[query.apaleo] ?? MESSAGES.error) : undefined;
 
@@ -147,16 +154,68 @@ export default async function ConnectionsPage({
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Stripe payments</CardTitle>
-              <Badge variant="secondary">Not connected</Badge>
+              <Badge
+                variant={
+                  stripe.status === 'active'
+                    ? 'success'
+                    : stripe.status === 'not_connected'
+                      ? 'secondary'
+                      : 'warning'
+                }
+              >
+                {
+                  {
+                    active: 'Connected',
+                    onboarding: 'Setup incomplete',
+                    restricted: 'Needs attention',
+                    not_connected: 'Not connected',
+                  }[stripe.status]
+                }
+              </Badge>
             </div>
             <CardDescription>
-              Guests pay on your own Stripe account. You are the merchant of record.
+              Guests pay on your own Stripe account: you are the merchant of record, payouts go straight to
+              you, and {BRAND.name}’s{' '}
+              {(stripe.defaultFeeBps / 100).toFixed(stripe.defaultFeeBps % 100 ? 1 : 0)}% fee is deducted as
+              an application fee on prepaid bookings (invoiced monthly for pay-at-hotel).
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            <p className="flex items-center gap-2">
-              <CheckCircle2 className="size-4" /> Set up after Apaleo is connected.
-            </p>
+          <CardContent className="grid gap-4 text-sm">
+            {stripe.connected ? (
+              <dl className="grid grid-cols-2 gap-2">
+                <dt className="text-muted-foreground">Account</dt>
+                <dd className="font-mono text-xs">{stripe.accountId}</dd>
+                <dt className="text-muted-foreground">Payments</dt>
+                <dd>{stripe.chargesEnabled ? 'Enabled' : 'Not yet enabled'}</dd>
+                <dt className="text-muted-foreground">Payouts</dt>
+                <dd>{stripe.payoutsEnabled ? 'Enabled' : 'Not yet enabled'}</dd>
+              </dl>
+            ) : null}
+            {stripe.connected && stripe.requirementsDue.length > 0 ? (
+              <Alert variant="warning">
+                Stripe still needs some information before you can take bookings.
+              </Alert>
+            ) : null}
+            {isOwner ? (
+              <div className="flex flex-wrap gap-2">
+                {stripe.status !== 'active' ? (
+                  <form action={connectStripe.bind(null, orgId)}>
+                    <Button type="submit" size={stripe.connected ? 'default' : 'lg'}>
+                      <CreditCard /> {stripe.connected ? 'Continue Stripe setup' : 'Connect Stripe'}
+                    </Button>
+                  </form>
+                ) : null}
+                {stripe.connected ? (
+                  <form action={refreshStripe.bind(null, orgId)}>
+                    <Button variant="outline" type="submit">
+                      <RefreshCw /> Refresh status
+                    </Button>
+                  </form>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">Only owners can connect a payout account.</p>
+            )}
           </CardContent>
         </Card>
       </div>
