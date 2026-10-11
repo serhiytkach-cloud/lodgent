@@ -14,11 +14,9 @@ import {
 } from '@lodgent/core';
 import type { BookingRow, Database, HoldRow, PropertyRow } from '@lodgent/db';
 import {
-  addDays,
   type CheckoutDto,
   type CheckoutGuestInput,
   formatMoney,
-  localDateAt,
   nightsBetween,
   toDisplayMoney,
 } from '@lodgent/shared';
@@ -79,7 +77,6 @@ export class CheckoutService {
       logger: Logger;
       webBaseUrl: string;
       simulatorUrl: string | null;
-      piiRetentionDays: number;
     },
   ) {}
 
@@ -614,32 +611,6 @@ export class CheckoutService {
         changes: { from: booking.pmsStatus, to: status },
       });
     });
-  }
-
-  /** Retention job: erase guest details some time after departure. */
-  async redactExpiredGuestData(): Promise<number> {
-    const { db, clock } = this.deps;
-    const cutoff = addDays(localDateAt(clock.now(), 'UTC'), -this.deps.piiRetentionDays);
-    const due = await db.system(({ bookings }) => bookings.piiExpired(cutoff));
-    for (const { organizationId, bookingId } of due) {
-      await db.tenant(organizationId, async (r) => {
-        await r.bookings.update(bookingId, {
-          guestFirstName: null,
-          guestLastName: null,
-          guestEmail: null,
-          guestPhone: null,
-          specialRequests: null,
-          piiRedactedAt: clock.now(),
-        });
-        await r.audit.record({
-          ...systemActor,
-          action: 'booking.guest_data_redacted',
-          entityType: 'booking',
-          entityId: bookingId,
-        });
-      });
-    }
-    return due.length;
   }
 
   // ---- presentation ------------------------------------------------------------------------

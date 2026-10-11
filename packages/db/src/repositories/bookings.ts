@@ -65,7 +65,10 @@ export interface GuestBookingRow {
 }
 
 /** Statuses whose checkout is still running: finalization reads the guest's details from the row. */
-export const IN_FLIGHT_BOOKING_STATUSES = ['pending_payment', 'reserving'] as const satisfies readonly BookingStatus[];
+export const IN_FLIGHT_BOOKING_STATUSES = [
+  'pending_payment',
+  'reserving',
+] as const satisfies readonly BookingStatus[];
 
 /** What redaction writes: every guest field emptied (the same for retention and erasure requests). */
 const redactedGuestFields = (now: Date) => ({
@@ -292,13 +295,7 @@ export function bookingRepo(tx: Tx, orgId: string) {
         .from(bookings)
         .innerJoin(properties, eq(properties.id, bookings.propertyId))
         .innerJoin(holds, eq(holds.id, bookings.holdId))
-        .where(
-          and(
-            own,
-            isNotNull(bookings.guestEmail),
-            sql`lower(${bookings.guestEmail}) = lower(${email})`,
-          ),
-        )
+        .where(and(own, isNotNull(bookings.guestEmail), sql`lower(${bookings.guestEmail}) = lower(${email})`))
         .orderBy(bookings.createdAt, bookings.id);
     },
     /**
@@ -320,7 +317,9 @@ export function bookingRepo(tx: Tx, orgId: string) {
             own,
             inArray(bookings.id, ids),
             isNull(bookings.piiRedactedAt),
-            options.exceptStatuses?.length ? notInArray(bookings.status, [...options.exceptStatuses]) : undefined,
+            options.exceptStatuses?.length
+              ? notInArray(bookings.status, [...options.exceptStatuses])
+              : undefined,
           ),
         )
         .returning({ id: bookings.id });

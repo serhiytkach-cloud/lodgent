@@ -3,6 +3,7 @@ import type { Database } from '@lodgent/db';
 import type { Logger } from 'pino';
 import { z } from 'zod';
 import { renderEmail } from '../email/templates';
+import { scrubEmails } from '../logging';
 
 const EmailPayload = z.object({ to: z.email(), template: z.string(), data: z.unknown() });
 const JobPayload = z.object({
@@ -39,7 +40,12 @@ export class OutboxDispatcher {
             { err: error, outboxId: message.id, topic: message.topic, attempts },
             'outbox delivery failed',
           );
-          await outbox.markFailed(message.id, String(error), new Date(clock.now().getTime() + backoffMs));
+          // Provider errors can quote the recipient's address; never store it with the error.
+          await outbox.markFailed(
+            message.id,
+            scrubEmails(String(error)),
+            new Date(clock.now().getTime() + backoffMs),
+          );
         }
       }
       return messages.length;

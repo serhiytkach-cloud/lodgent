@@ -1,6 +1,6 @@
 import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 
-export type SigningPurpose = 'oauth-state' | 'checkout' | 'webhook-path';
+export type SigningPurpose = 'oauth-state' | 'checkout' | 'webhook-path' | 'guest-ref';
 
 /**
  * Compact signed tokens (`base64url(payload).base64url(hmac)`) with an expiry. Each purpose uses its
@@ -32,6 +32,14 @@ export class Signer {
     ).toString('base64url');
     const mac = createHmac('sha256', this.key(purpose)).update(body).digest('base64url');
     return `${body}.${mac}`;
+  }
+
+  /**
+   * A keyed hash (HMAC-SHA256, hex) of `value`: stable for the same input, but not reversible or
+   * guessable without the root secret. Used for pseudonymous references (e.g. guest emails in audit logs).
+   */
+  digest(purpose: SigningPurpose, value: string): string {
+    return createHmac('sha256', this.key(purpose)).update(value).digest('hex');
   }
 
   verify<T extends Record<string, unknown>>(

@@ -37,6 +37,7 @@ import { AwsKeyManagement, LocalKeyManagement } from './infra/kms';
 import { SesMailer, SmtpMailer } from './infra/mailer';
 import { PgJobQueue, SqsJobQueue } from './infra/queue';
 import { Signer } from './infra/signing';
+import { privacyLoggerOptions } from './logging';
 import { AccountService } from './services/accounts';
 import { AgentService } from './services/agent';
 import { AgentClientService } from './services/agent-clients';
@@ -56,6 +57,7 @@ import { PaymentWebhookService } from './services/payment-webhooks';
 import { PmsConnectionService } from './services/pms-connections';
 import { PmsSyncService } from './services/pms-sync';
 import { PmsWebhookService } from './services/pms-webhooks';
+import { PrivacyService } from './services/privacy';
 import { ProfileService } from './services/profile';
 import { PropertyService } from './services/properties';
 import { VisibilityService } from './services/visibility';
@@ -121,7 +123,6 @@ function createServices(config: AppConfig, a: Adapters) {
     logger: a.logger,
     webBaseUrl: config.webBaseUrl,
     simulatorUrl: config.stripe.apiBaseUrl ?? null,
-    piiRetentionDays: config.business.piiRetentionDays,
   });
   const billing = new BillingService({
     db: a.db,
@@ -150,6 +151,13 @@ function createServices(config: AppConfig, a: Adapters) {
       defaultFeeBps: config.business.defaultFeeBps,
     }),
     checkout,
+    privacy: new PrivacyService({
+      db: a.db,
+      clock: a.clock,
+      signer: a.signer,
+      logger: a.logger,
+      piiRetentionDays: config.business.piiRetentionDays,
+    }),
     paymentWebhooks: new PaymentWebhookService({
       db: a.db,
       clock: a.clock,
@@ -267,16 +275,8 @@ export function createContainer(
     pino({
       name: `${BRAND.slug}-${overrides.name ?? 'app'}`,
       level: config.logLevel,
-      redact: {
-        paths: [
-          'req.headers.authorization',
-          'req.headers.cookie',
-          'req.headers["x-api-key"]',
-          '*.password',
-          '*.token',
-        ],
-        censor: '[redacted]',
-      },
+      // Secrets and guest PII never reach the logs (redaction paths, URL and error serializers).
+      ...privacyLoggerOptions,
     });
   const db =
     overrides.db ??

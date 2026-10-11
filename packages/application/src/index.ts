@@ -10,7 +10,14 @@ export { Signer } from './infra/signing';
 export { createJobHandlers, type JobContext, type JobHandler, RetryLaterError } from './jobs/registry';
 export { PgJobRunner, SqsJobConsumer } from './jobs/runner';
 export { LocalScheduler, SCHEDULES, type Schedule } from './jobs/schedules';
+export { privacyLoggerOptions, redactUrl, scrubEmails } from './logging';
 export { type AgentCaller, anonymousRestCaller, redactForLog } from './services/agent-log';
 export { hashToken, newToken } from './services/members';
 export { dueNow, offerQueryKey, toOfferDto } from './services/offers';
 export { mergeFromPms } from './services/pms-sync';
+export {
+  GUEST_DATA_REQUESTS_PER_HOUR,
+  PrivacyService,
+  RETENTION,
+  type RetentionResult,
+} from './services/privacy';
