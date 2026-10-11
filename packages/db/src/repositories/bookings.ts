@@ -1,4 +1,18 @@
-import { and, desc, eq, gt, gte, ilike, inArray, lt, or, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type { Tx } from '../client';
 import { agentClients, bookings, feeLedger, holds, paymentAccounts, properties } from '../schema';
 import type { OfferQuoteDetails } from '../schema/pms';
@@ -41,6 +55,28 @@ export interface BookingListRow {
 }
 
 export const escapeLike = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** A booking found by guest email, with what a guest data export shows alongside it. */
+export interface GuestBookingRow {
+  booking: BookingRow;
+  propertyName: string;
+  timeZone: string;
+  offer: OfferQuoteDetails;
+}
+
+/** Statuses whose checkout is still running: finalization reads the guest's details from the row. */
+export const IN_FLIGHT_BOOKING_STATUSES = ['pending_payment', 'reserving'] as const satisfies readonly BookingStatus[];
+
+/** What redaction writes: every guest field emptied (the same for retention and erasure requests). */
+const redactedGuestFields = (now: Date) => ({
+  guestFirstName: null,
+  guestLastName: null,
+  guestEmail: null,
+  guestPhone: null,
+  specialRequests: null,
+  piiRedactedAt: now,
+  updatedAt: now,
+});
 
 export function holdRepo(tx: Tx, orgId: string) {
   const own = eq(holds.organizationId, orgId);
@@ -240,6 +276,56 @@ export function bookingRepo(tx: Tx, orgId: string) {
         .orderBy(desc(bookings.createdAt))
         .limit(options.limit ?? 100);
     },
+    /**
+     * Bookings whose guest email matches, case-insensitively (emails are stored lower-cased, and the
+     * comparison lower-cases both sides for rows written before that). Redacted bookings no longer
+     * match: their email is gone.
+     */
+    async byGuestEmail(email: string): Promise<GuestBookingRow[]> {
+      return tx
+        .select({
+          booking: bookings,
+          propertyName: properties.name,
+          timeZone: properties.timeZone,
+          offer: holds.offer,
+        })
+        .from(bookings)
+        .innerJoin(properties, eq(properties.id, bookings.propertyId))
+        .innerJoin(holds, eq(holds.id, bookings.holdId))
+        .where(
+          and(
+            own,
+            isNotNull(bookings.guestEmail),
+            sql`lower(${bookings.guestEmail}) = lower(${email})`,
+          ),
+        )
+        .orderBy(bookings.createdAt, bookings.id);
+    },
+    /**
+     * Erases the guest's details on these bookings (fields emptied, `pii_redacted_at` set). Rows that
+     * are already redacted, or whose status is in `exceptStatuses`, are left alone, so the call is
+     * idempotent and safe against a concurrent status change. Returns the ids actually redacted.
+     */
+    async redactGuestData(
+      ids: string[],
+      now: Date,
+      options: { exceptStatuses?: readonly BookingStatus[] } = {},
+    ): Promise<string[]> {
+      if (ids.length === 0) return [];
+      const rows = await tx
+        .update(bookings)
+        .set(redactedGuestFields(now))
+        .where(
+          and(
+            own,
+            inArray(bookings.id, ids),
+            isNull(bookings.piiRedactedAt),
+            options.exceptStatuses?.length ? notInArray(bookings.status, [...options.exceptStatuses]) : undefined,
+          ),
+        )
+        .returning({ id: bookings.id });
+      return rows.map((r) => r.id);
+    },
     /** Bookings with what the dashboard shows alongside them (property, offer snapshot, agent, fee). */
     async search(filters: BookingSearch): Promise<{ rows: BookingListRow[]; total: number }> {
       const where = and(
@@ -346,12 +432,27 @@ export function bookingSystemRepo(tx: Tx) {
         .orderBy(bookings.updatedAt)
         .limit(limit);
     },
-    /** Pay-at-hotel and prepaid bookings whose guest data is past retention. */
-    async piiExpired(before: string, limit = 200): Promise<{ organizationId: string; bookingId: string }[]> {
+    /**
+     * Bookings whose guest data is past retention and not yet redacted: stays that ended before
+     * `departedBefore`, and checkouts that failed (no reservation was made) before `failedBefore`.
+     */
+    async piiDue(
+      cutoffs: { departedBefore: string; failedBefore: Date },
+      limit = 200,
+    ): Promise<{ organizationId: string; bookingId: string }[]> {
       return tx
         .select({ organizationId: bookings.organizationId, bookingId: bookings.id })
         .from(bookings)
-        .where(and(lt(bookings.departure, before), sql`${bookings.piiRedactedAt} is null`))
+        .where(
+          and(
+            isNull(bookings.piiRedactedAt),
+            or(
+              lt(bookings.departure, cutoffs.departedBefore),
+              and(eq(bookings.status, 'failed'), lt(bookings.updatedAt, cutoffs.failedBefore)),
+            ),
+          ),
+        )
+        .orderBy(bookings.id)
         .limit(limit);
     },
   };

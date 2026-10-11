@@ -3,6 +3,7 @@ export * from './api/bookings';
 export * from './api/checkout';
 export * from './api/dashboard';
 export * from './api/offers';
+export * from './api/privacy';
 export * from './api/profile';
 export * from './api/visibility';
 export * from './brand';

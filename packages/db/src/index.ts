@@ -9,12 +9,14 @@ export type {
   BookingSearch,
   BookingStatus,
   FeeLedgerRow,
+  GuestBookingRow,
   HoldRow,
   HoldStatus,
   NewBooking,
   NewHold,
   PaymentAccountRow,
 } from './repositories/bookings';
+export { IN_FLIGHT_BOOKING_STATUSES } from './repositories/bookings';
 export type { CatalogProperty } from './repositories/catalog';
 export type { AgentKey, FunnelBookingCount, FunnelEventCount, FunnelWindow } from './repositories/funnel';
 export type {
@@ -35,6 +37,7 @@ export { scopeKeyFor } from './repositories/profile';
 export type { JobRow, OutboxRow } from './repositories/queue';
 export type { SystemRepos } from './repositories/system';
 export type {
+  AuditEntry,
   AuditLogRow,
   InvitationRow,
   MembershipRole,
