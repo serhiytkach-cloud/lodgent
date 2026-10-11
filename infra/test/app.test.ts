@@ -363,6 +363,23 @@ describe('alarms', () => {
     expect(worker.Properties.DesiredCount).toBe(0);
   });
 
+  it('lets CloudWatch alarms of this account publish to the TLS-only alarm topic', () => {
+    const platform = app.template(app.env('prod').platform);
+    const policy = only(resources(platform, 'AWS::SNS::TopicPolicy'));
+    const statements = (policy.Properties.PolicyDocument as { Statement: Record<string, unknown>[] })
+      .Statement;
+    expect(statements.map((s) => [s.Sid, s.Effect])).toEqual([
+      ['AllowPublishThroughSSLOnly', 'Deny'],
+      ['AllowCloudWatchAlarms', 'Allow'],
+    ]);
+    expect(statements[1]).toMatchObject({
+      Principal: { Service: 'cloudwatch.amazonaws.com' },
+      Action: 'sns:Publish',
+      Condition: { StringEquals: { 'aws:SourceAccount': { Ref: 'AWS::AccountId' } } },
+    });
+    expect(JSON.stringify(statements[1])).toContain(':alarm:*');
+  });
+
   it('subscribes the alarm email from context', () => {
     const withEmail = synth({ 'prod.alarmEmail': 'ops@example.com' });
     withEmail.template(withEmail.env('prod').platform).hasResourceProperties('AWS::SNS::Subscription', {

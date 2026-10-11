@@ -22,6 +22,7 @@ export interface GithubDeployStackProps extends StackProps {
  *  - run and watch the migration task, including a temporary revision of it with the new image
  *    (ECS cannot override a container image per run), passing only the migration task's two roles,
  *  - read the environment's stack outputs and exports and wait for service rollouts.
+ * Everything regional is limited to the environment's region.
  */
 export class GithubDeployStack extends Stack {
   readonly roles: Partial<Record<EnvName, iam.Role>> = {};

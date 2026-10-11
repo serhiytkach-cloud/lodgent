@@ -1,5 +1,5 @@
 import { SCHEDULES, type Schedule } from '@lodgent/shared';
-import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
+import { ArnFormat, CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -180,6 +180,27 @@ export class PlatformStack extends Stack {
       displayName: `${names.prefix} alarms`,
       enforceSSL: true,
     });
+    // The TLS-only policy replaces SNS's default topic policy, so CloudWatch alarms (of this account
+    // only) need an explicit grant to publish.
+    this.alarmTopic.addToResourcePolicy(
+      new iam.PolicyStatement({
+        sid: 'AllowCloudWatchAlarms',
+        principals: [new iam.ServicePrincipal('cloudwatch.amazonaws.com')],
+        actions: ['sns:Publish'],
+        resources: [this.alarmTopic.topicArn],
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': this.account },
+          ArnLike: {
+            'aws:SourceArn': this.formatArn({
+              service: 'cloudwatch',
+              resource: 'alarm',
+              resourceName: '*',
+              arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+            }),
+          },
+        },
+      }),
+    );
     if (config.alarmEmail)
       this.alarmTopic.addSubscription(new subscriptions.EmailSubscription(config.alarmEmail));
     this.createAlarms(config, data);

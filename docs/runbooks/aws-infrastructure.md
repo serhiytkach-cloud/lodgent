@@ -66,25 +66,44 @@ Per-environment keys (defaults in `infra/lib/config.ts`, `ENV_DEFAULTS`):
 | `appEnvironment` | {} | {} | Extra plain env for api and worker. Secrets and `DATABASE_*` are refused |
 | `api` / `web` / `worker` | 512/1024, 1–2 | api 1024/2048, 2–6; web 512/1024, 2–4; worker 1024/2048, 1–4 | `{ cpu, memoryMiB, minCount, maxCount }`; `minCount: 0` pins the service at 0 tasks |
 
-Without `domainName` the ALB serves plain HTTP on its DNS name, with API paths routed by path. That is fine for a smoke test, but dashboard sign-in does not work: Cognito only allows HTTP callbacks for localhost.
+### What synthesizes without operator input
+
+`pnpm cdk:synth` needs no context and no AWS credentials (no lookups). With the defaults:
+
+| Feature | Without context | Turned on by |
+| --- | --- | --- |
+| TLS, HTTP→HTTPS redirect, host routing | off: plain HTTP on the ALB DNS name; `/v1/*`, `/mcp`, `/mcp/*`, `/webhooks/*`, `/openapi.json`, `/openapi.full.json` and `/readyz` go to the api, everything else (including `/healthz`) to the web | `domainName` (+ `certificateArn` or `hostedZoneId`) |
+| ACM certificate | none | `domainName`: requested (DNS-validated in `hostedZoneId`, or pending manual CNAMEs) unless `certificateArn` |
+| Route 53 aliases, SES DNS records | none | `hostedZoneId` |
+| SES identity and configuration set | none: email sending fails (synth notes this) | `domainName` |
+| Cognito callbacks | `http://localhost:3000` only: dashboard sign-in on AWS needs a domain | `domainName` (dev keeps localhost too) |
+| Alarm notifications | topic without subscribers | `alarmEmail` |
+| Deployed image | `:latest` (synth warns) | `imageTag` (the pipeline passes the git SHA) |
+
+Everything else (VPC, database, queue, schedules, WAF, services, alarms, dashboard, deploy roles) is always defined.
 
 ## First-time setup (per AWS account, administrator)
+
+The deploy pipeline (deploy.md) pushes images, runs the migration task and deploys `lodgent-<env>-*`. Before its first run, an administrator deploys everything except the services once, from a workstation. Every command below runs from the repository root and takes `-c env=<env>`, so only that environment is synthesized.
 
 1. **Bootstrap CDK** in the account and region:
    `pnpm --filter @lodgent/infra exec cdk bootstrap aws://<account>/<region>`.
    Consider `--cloudformation-execution-policies` with a narrower policy than AdministratorAccess.
 2. **GitHub deploy roles.** In a single-account setup:
-   `pnpm --filter @lodgent/infra exec cdk deploy lodgent-github-deploy`.
+   `pnpm --filter @lodgent/infra exec cdk deploy lodgent-github-deploy -c env=<env>`.
    - Separate dev and prod accounts: add `-c githubDeployEnvs=dev` or `=prod` per account.
    - An existing GitHub OIDC provider: add `-c githubOidcProviderArn=arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com`.
-   - Put the `lodgent-<env>-GithubDeployRoleArn` export into the GitHub environment `<env>` (see deploy.md), and require reviewers on `prod`.
-3. **Network and data stacks:** `cdk deploy lodgent-<env>-network lodgent-<env>-data`. This creates the ECR repositories the pipeline pushes to, and the database (10 to 20 minutes).
+   - Each role may act only in its environment's region (`<env>.region`), so deploy this stack with the same region context as the environments.
+   - Put the `lodgent-<env>-GithubDeployRoleArn` export into the GitHub environment `<env>` (deploy.md), and require reviewers on `prod`.
+3. **Foundation stacks:**
+   `pnpm --filter @lodgent/infra exec cdk deploy lodgent-<env>-network lodgent-<env>-data lodgent-<env>-platform -c env=<env>`.
+   This creates the ECR repositories the pipeline pushes to, the database (10 to 20 minutes), the app secret, the cluster, the load balancer and the migration task definition with the exports the pipeline reads. The image tag does not matter yet: the pipeline runs the migration with its own image. Without a hosted zone, the platform stack waits until the ACM validation CNAMEs exist (step 5).
 4. **Fill the app secret** `lodgent/<env>/app`. It is created with every key as an empty string, except a generated `SIGNING_SECRET`. ECS fails to start a task whose secret lacks a key, so keep all keys.
 
    ```bash
    aws secretsmanager get-secret-value --secret-id lodgent/<env>/app --query SecretString --output text > app.json
    # Edit app.json. Required in production:
-   #   INTERNAL_API_TOKEN, AUTH_DEV_SECRET     random (openssl rand -hex 32)
+   #   INTERNAL_API_TOKEN (min 8 chars), AUTH_DEV_SECRET (min 32)   random: openssl rand -hex 32
    #   APALEO_CLIENT_ID/SECRET, APALEO_WEBHOOK_TOKEN (random)
    #   STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET (+ STRIPE_CONNECT_WEBHOOK_SECRET)
    #   COGNITO_CLIENT_SECRET (below)
@@ -97,14 +116,16 @@ Without `domainName` the ALB serves plain HTTP on its DNS name, with API paths r
 
    Running tasks keep the values they started with. After a change, run `aws ecs update-service --force-new-deployment` for the api, worker and web.
 5. **DNS and email**:
-   - Without a hosted zone, add the ACM validation CNAMEs (ACM console; the platform deploy waits for them), and point `api.`/`app.<domain>` at `lodgent-<env>-LoadBalancerDnsName`.
-   - Add the SES DKIM CNAMEs (`EmailDkimRecord1..3` outputs) and the MAIL FROM records for `mail.<domain>`: MX `10 feedback-smtp.<region>.amazonses.com` and TXT `v=spf1 include:amazonses.com ~all`.
+   - Without a hosted zone, add the ACM validation CNAMEs (ACM console), and point `api.`/`app.<domain>` at `lodgent-<env>-LoadBalancerDnsName`.
+   - Add the SES DKIM CNAMEs (`EmailDkimRecord1..3` outputs) and the MAIL FROM records for `mail.<domain>`: MX `10 feedback-smtp.<region>.amazonses.com` and TXT `v=spf1 include:amazonses.com ~all`. With a hosted zone, CDK creates them.
    - Publish a DMARC record, and request SES production access.
-6. **Run the pipeline** (deploy.md). It pushes images, migrates and deploys `platform` and `services`.
+6. **Run the pipeline** (deploy.md). It pushes images, migrates and deploys all four stacks with `-c imageTag=<sha>`, which creates the services.
 7. **Confirm** the SNS alarm subscription email.
-8. **Register webhooks** at `https://api.<domain>`:
+8. **Register webhooks** at the API URL (`lodgent-<env>-ApiUrl`):
    - Stripe: `/webhooks/stripe`, platform and Connect endpoints, with their signing secrets in the app secret.
    - Apaleo: the app subscribes itself, using `APALEO_WEBHOOK_TOKEN`.
+
+Never deploy `lodgent-<env>-services` without `-c imageTag=<sha>`: it would roll the services to `:latest`, which is never pushed (synth warns `lodgent:default-image-tag`), and the deployment would fail and roll back.
 
 ## Outputs the pipeline uses
 
@@ -136,6 +157,7 @@ aws ecs run-task --cluster lodgent-<env> --launch-type FARGATE \
 - **Alarms and dashboard:** the CloudWatch dashboard `lodgent-<env>`; alarms named `lodgent-<env>-*` notify the SNS topic.
 - **Dead-letter queue** (`lodgent-<env>-jobs-dlq`): read the worker logs for the job type, fix the cause, then use "Start DLQ redrive" in the SQS console (back to `lodgent-<env>-jobs`). Undeliverable scheduler runs land there too.
 - **Scaling:** change `<env>.api.maxCount` etc. in `cdk.json` and deploy. Autoscaling owns the running count, and deploys do not reset it.
+- **New app secret key:** add the key to the live secret `lodgent/<env>/app` first (as above), then to `APP_SECRET_KEYS` in `infra/lib/data-stack.ts`, then deploy. Never edit `APP_SECRET_TEMPLATE_KEYS`: CloudFormation would generate a new value for the whole secret and wipe the credentials (the previous value stays recoverable as the `AWSPREVIOUS` version).
 - **Shell in a task:** deploy with `-c <env>.enableExecuteCommand=true`, then `aws ecs execute-command --cluster lodgent-<env> --task <id> --container api --interactive --command sh`.
 - **Database access:** there is no public endpoint. Use ECS Exec into an api task, or a temporary bastion in the app subnets with the one-off security group.
 - **Logs:** `/lodgent/<env>/{api,worker,web,migrate}` (the collector sidecar logs under the `otel-collector/` stream prefix); VPC flow logs `/lodgent/<env>/vpc-flow-logs`; WAF `aws-waf-logs-lodgent-<env>` (blocked and counted requests only); ALB access logs in the platform stack's bucket under `alb/`.
