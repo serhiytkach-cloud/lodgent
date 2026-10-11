@@ -22,7 +22,7 @@ API checks (October 2026) against the installed `aws-cdk-lib` 2.273.0 typings: s
 
 `<slug>-github-deploy` (OIDC provider and deploy roles) is deployed once per account by an administrator.
 
-The split follows lifecycle. `data` exists before the first image push (registries) and before the first services deploy (the operator fills the app secret). Everything the migration needs exists before the services roll, so the pipeline can migrate first.
+The split follows lifecycle. An administrator deploys `network`, `data` and `platform` once before the first pipeline run: the registries must exist for the first image push, the operator fills the app secret before any service starts, and the migration step reads the cluster, task definition and network exports. From then on every pipeline run migrates (with the new image) before `cdk deploy` rolls the services.
 
 **Database.** RDS for PostgreSQL 16, which ships pgvector; migration 0000 runs `CREATE EXTENSION vector` as the master user.
 - Placement: isolated subnets, not publicly accessible. The database security group admits only the api, worker and one-off task groups.
