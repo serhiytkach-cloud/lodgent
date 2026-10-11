@@ -71,9 +71,10 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [x] Dashboard: share-of-voice trend, per-provider breakdown, competitors, missing queries, recommendations
 
 ### M7: Bookings & fees dashboard
-- [ ] Funnel: queries → offers → holds → checkouts → paid → reservations, by agent/provider and over time
-- [ ] Bookings list with status and Apaleo link; fees accrued; monthly invoices via Stripe Billing
-- [ ] CSV export
+- [x] Funnel: queries → offers → holds → checkouts → paid → reservations, by agent/provider and over time
+- [x] Bookings list with status and Apaleo link; fees accrued; monthly invoices via Stripe Billing (ADR 0011)
+- [x] CSV export (bookings; fee lines per month), spreadsheet-formula safe
+- [x] Operator CLI for per-property fee rates and invoicing a month on demand
 
 ### M8: AWS & hardening
 - [ ] CDK stacks per environment (dev, prod): VPC, ECS Fargate, ALB + ACM, WAF, RDS, SQS, EventBridge Scheduler, Secrets Manager, KMS, SES, CloudWatch alarms

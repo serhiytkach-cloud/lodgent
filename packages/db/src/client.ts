@@ -16,6 +16,12 @@ export interface DatabaseOptions {
   /** Require TLS (RDS). */
   ssl?: boolean;
   applicationName?: string;
+  /**
+   * Called when an idle pooled connection fails (database restart, failover, admin termination).
+   * The pool drops the connection and opens a new one on demand; without a listener Node would
+   * treat the error as unhandled and exit.
+   */
+  onIdleError?: (error: Error) => void;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,6 +44,11 @@ export class Database {
       max: options.max ?? 10,
       ssl: options.ssl ? { rejectUnauthorized: true } : undefined,
       application_name: options.applicationName,
+    });
+    this.pool.on('error', (error) => {
+      (options.onIdleError ?? ((e: Error) => console.warn('idle database connection failed:', e.message)))(
+        error,
+      );
     });
     this.orm = drizzle(this.pool, { schema });
   }

@@ -139,7 +139,7 @@ export default async function BookingsPage({
                   <Td>
                     <Link
                       href={`/app/${orgId}/bookings/${b.id}`}
-                      className="font-medium text-primary hover:underline"
+                      className="font-medium whitespace-nowrap text-primary hover:underline"
                     >
                       {b.reference}
                     </Link>
@@ -162,7 +162,7 @@ export default async function BookingsPage({
                   </Td>
                   <Td className="text-right tabular-nums">
                     {formatMoney({ amount: b.totalAmount, currency: b.currency })}
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs whitespace-nowrap text-muted-foreground">
                       {b.paymentMode === 'prepaid' ? 'Prepaid' : 'Pay at hotel'}
                     </p>
                   </Td>
@@ -176,7 +176,7 @@ export default async function BookingsPage({
                     <BookingStatusBadge status={b.status} />
                   </Td>
                   <Td>
-                    <span className="text-sm">{b.agent.name}</span>
+                    <span className="text-sm whitespace-nowrap">{b.agent.name}</span>
                     <div className="mt-0.5 flex gap-1">
                       <Badge variant="outline">{b.agent.channel.toUpperCase()}</Badge>
                       {b.agent.partner ? <Badge variant="secondary">Partner</Badge> : null}

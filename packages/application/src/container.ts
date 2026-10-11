@@ -285,6 +285,7 @@ export function createContainer(
       ssl: config.database.ssl,
       max: config.database.poolMax,
       applicationName: `${BRAND.slug}-${overrides.name ?? 'app'}`,
+      onIdleError: (err) => logger.warn({ err }, 'idle database connection failed; the pool will reconnect'),
     });
   const devIdentity = overrides.devIdentity ?? new DevIdentityProvider(config.auth.devSecret);
   const identity =

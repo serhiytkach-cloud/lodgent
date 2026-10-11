@@ -180,7 +180,7 @@ export default async function FunnelPage({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex h-36 items-end gap-px" role="img" aria-label="Searches per day">
+              <div className="flex h-36 items-end gap-0.5" role="img" aria-label="Searches per day">
                 {funnel.daily.map((d) => (
                   <div
                     key={d.date}
@@ -191,7 +191,7 @@ export default async function FunnelPage({
                       <span className="mx-auto mb-1 size-1.5 rounded-full bg-success" aria-hidden />
                     ) : null}
                     <div
-                      className="rounded-t-sm bg-primary/70"
+                      className="mx-auto w-full max-w-6 rounded-t-sm bg-primary/70"
                       style={{
                         height: `${(d.searches / dailyMax) * 100}%`,
                         minHeight: d.searches > 0 ? 2 : 0,

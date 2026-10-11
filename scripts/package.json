@@ -7,7 +7,8 @@
     "seed": "tsx seed.ts",
     "agent-sim": "tsx agent-sim.ts",
     "typecheck": "tsc --noEmit",
-    "partner-key": "tsx partner-key.ts"
+    "partner-key": "tsx partner-key.ts",
+    "billing": "tsx billing.ts"
   },
   "dependencies": {
     "@lodgent/application": "workspace:*",

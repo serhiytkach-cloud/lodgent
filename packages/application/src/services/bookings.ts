@@ -28,6 +28,14 @@ export interface BookingListFilters {
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
+/** The value most entries share; undefined when there is no single winner. */
+function mostCommon(values: string[]): string | undefined {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const [first, second] = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  return first && (!second || second[1] < first[1]) ? first[0] : undefined;
+}
+
 /**
  * The hotel's view of agent bookings: the list and detail with fees, the CSV export, and the agent
  * funnel from first search to PMS reservation.
@@ -262,8 +270,8 @@ export class BookingsService {
       const properties = await r.properties.list();
       const property = input.propertyId ? properties.find((p) => p.id === input.propertyId) : undefined;
       if (input.propertyId && !property) throw new NotFoundError('Property');
-      // Days are cut in the property's zone (or the first property's, for the whole group).
-      const zone = (property ?? properties[0])?.timeZone;
+      // Days are cut in the property's zone (or the group's most common one, else UTC).
+      const zone = property?.timeZone ?? mostCommon(properties.map((p) => p.timeZone));
       const timeZone = zone && isValidTimeZone(zone) ? zone : 'UTC';
       const today = localDateAt(clock.now(), timeZone);
       const to = addDays(today, 1);

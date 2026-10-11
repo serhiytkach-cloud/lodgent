@@ -3,12 +3,14 @@ import {
   type Clock,
   INVOICE_DAYS_UNTIL_DUE,
   type JobQueue,
+  MAX_FEE_BPS,
   MIN_INVOICE_AMOUNT,
   NotFoundError,
   type PaymentProvider,
   periodLabel,
   previousBillingPeriod,
   toCsv,
+  ValidationError,
 } from '@lodgent/core';
 import type { Database, FeeInvoiceRow, TenantRepos } from '@lodgent/db';
 import { BRAND, type FeeInvoiceDto, type FeesDto, toMajor } from '@lodgent/shared';
@@ -130,6 +132,50 @@ export class BillingService {
         l.fee.invoiceId ? (numbers.get(l.fee.invoiceId) ?? '') : '',
       ]),
     );
+  }
+
+  // ---- operator tools ------------------------------------------------------------------------
+
+  async listFeeRates() {
+    return this.deps.db.system(({ billing }) => billing.properties());
+  }
+
+  /**
+   * Sets a property's fee rate (operator only; hotels see but cannot change it). Applies to holds
+   * created from now on; existing holds and bookings keep the fee they were quoted with.
+   */
+  async setFeeRate(propertyId: string, feeBps: number): Promise<{ from: number; to: number }> {
+    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > MAX_FEE_BPS) {
+      throw new ValidationError(`Fee must be a whole number of basis points between 0 and ${MAX_FEE_BPS}`);
+    }
+    const { db } = this.deps;
+    const property = (await this.listFeeRates()).find((p) => p.id === propertyId);
+    if (!property) throw new NotFoundError('Property');
+    await db.tenant(property.organizationId, async (r) => {
+      await r.properties.update(propertyId, { feeBps });
+      await r.audit.record({
+        ...systemActor,
+        action: 'billing.fee_rate_changed',
+        entityType: 'property',
+        entityId: propertyId,
+        changes: { feeBps: { from: property.feeBps, to: feeBps } },
+      });
+    });
+    return { from: property.feeBps, to: feeBps };
+  }
+
+  /** Invoices a past month now for every hotel group (operator; the daily job does this on the 1st). */
+  async invoicePeriod(period: string): Promise<FeeInvoiceRow[]> {
+    const [y, m] = period.split('-').map(Number);
+    if (!y || !m || m < 1 || m > 12) throw new ValidationError('Period must be YYYY-MM');
+    const next = new Date(Date.UTC(y, m, 1));
+    const departedBefore = next.toISOString().slice(0, 10);
+    if (next > this.deps.clock.now())
+      throw new ValidationError('Only months that have ended can be invoiced');
+    const orgs = await this.deps.db.system(({ billing }) => billing.orgsWithUninvoicedFees(departedBefore));
+    const issued: FeeInvoiceRow[] = [];
+    for (const orgId of orgs) issued.push(...(await this.invoiceOrg(orgId, period, departedBefore)));
+    return issued;
   }
 
   // ---- invoicing ---------------------------------------------------------------------------

@@ -90,7 +90,7 @@ export default async function BookingPage({
               <Row label="Rate">{b.ratePlanName}</Row>
               <Row label="Cancellation">
                 {b.cancellation.name ?? '—'}
-                {b.cancellation.freeUntil ? (
+                {b.cancellation.freeUntil && new Date(b.cancellation.freeUntil) > new Date(b.createdAt) ? (
                   <span className="block text-xs text-muted-foreground">
                     Free until {formatDateTime(b.cancellation.freeUntil)}
                   </span>

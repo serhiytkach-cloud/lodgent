@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { Tx } from '../client';
-import { bookings, feeInvoices, feeLedger, properties } from '../schema';
+import { bookings, feeInvoices, feeLedger, organizations, properties } from '../schema';
 import type { FeeLedgerRow } from './bookings';
 
 export type FeeInvoiceRow = typeof feeInvoices.$inferSelect;
@@ -213,6 +213,22 @@ export function billingSystemRepo(tx: Tx) {
         .select({ organizationId: feeInvoices.organizationId, id: feeInvoices.id })
         .from(feeInvoices)
         .where(eq(feeInvoices.status, 'open'));
+    },
+    /** Properties with their organization, for operator tools (fee rates). */
+    async properties(): Promise<
+      { id: string; name: string; organizationId: string; organizationName: string; feeBps: number }[]
+    > {
+      return tx
+        .select({
+          id: properties.id,
+          name: properties.name,
+          organizationId: properties.organizationId,
+          organizationName: organizations.name,
+          feeBps: properties.feeBps,
+        })
+        .from(properties)
+        .innerJoin(organizations, eq(organizations.id, properties.organizationId))
+        .orderBy(asc(organizations.name), asc(properties.name));
     },
     async invoiceOwner(id: string): Promise<{ organizationId: string } | undefined> {
       const [row] = await tx

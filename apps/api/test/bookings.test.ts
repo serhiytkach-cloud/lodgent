@@ -330,4 +330,25 @@ describe('bookings, funnel and fees', () => {
     expect((resumed.lines as Json).data).toHaveLength(1);
     expect(resumed.amount_due).toBe(issued.amount);
   });
+
+  it('lets the operator change a property’s fee rate for new holds only', async () => {
+    const billing = app.container.services.billing;
+    await expect(billing.setFeeRate(lisbon, 5_000)).rejects.toThrow(/between 0 and 2000/);
+    expect(await billing.setFeeRate(lisbon, 150)).toEqual({ from: 200, to: 150 });
+    const fees = await app.call('GET', `/v1/orgs/${orgId}/fees`, { token });
+    expect(fees.body.properties.find((p: Json) => p.id === lisbon).feeBps).toBe(150);
+    // Bookings already made keep their quoted fee.
+    const list = await app.call('GET', `/v1/orgs/${orgId}/bookings?status=confirmed`, { token });
+    expect(list.body.bookings.every((b: Json) => b.feeBps === 200)).toBe(true);
+    const offers = await app.call(
+      'GET',
+      `/v1/agent/hotels/${lisbon}/offers?checkIn=${checkIn}&checkOut=${checkOut}&adults=2`,
+    );
+    const hold = await app.call('POST', '/v1/agent/holds', {
+      body: { offerId: offers.body.offers[0].offerId },
+    });
+    expect(hold.status).toBe(201);
+    const row = await app.container.db.tenant(orgId, (r) => r.holds.get(hold.body.holdId));
+    expect(row?.feeBps).toBe(150);
+  });
 });
