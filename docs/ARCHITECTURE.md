@@ -81,3 +81,22 @@ The worker runs target queries weekly across the configured LLM providers (web-s
 ## Observability
 
 pino structured JSON logs with request IDs, and OpenTelemetry traces (HTTP, Fastify, pg) exported over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. CloudWatch alarms are defined in CDK.
+
+## AWS deployment
+
+The CDK app in `infra/` (ADR 0013; runbook `docs/runbooks/aws-infrastructure.md`) defines four stacks per environment (`dev`, `prod`), deployed in this order, plus a once-per-account GitHub OIDC deploy-role stack:
+
+```
+ internet ─► ALB (WAF, TLS, host routing) ─┬─► web tasks ──┐ server-side calls via Cloud Map,
+                                           └─► api tasks ◄─┘ not through the ALB
+ EventBridge Scheduler ─► SQS jobs (+DLQ) ─► worker tasks
+ api · worker · migrate task ─► RDS PostgreSQL 16 (isolated subnets, TLS only)
+ KMS (tokens) · Secrets Manager (ECS secrets) · SES · Cognito · X-Ray (ADOT collector sidecar)
+```
+
+- **network:** VPC in 2 AZs (public / private app / isolated data), NAT, S3 gateway endpoint, interface endpoints in prod, flow logs, all security groups.
+- **data:** KMS keys, RDS PostgreSQL 16 with pgvector, the app secret `<slug>/<env>/app`, the jobs queue and DLQ, ECR repositories `<slug>-<env>-{api,worker,web}`, the Cognito user pool and web client, the SES identity.
+- **platform:** ECS cluster, ALB with WAF and access logs, ACM/Route 53 when a domain is configured, the one-off `migrate` task definition, one EventBridge schedule per entry of `SCHEDULES` (`@lodgent/shared`), the alarm topic and alarms.
+- **services:** Fargate services for the api, worker and web, autoscaling, an OpenTelemetry collector sidecar (X-Ray) in the api and worker tasks, and the dashboard.
+
+Tasks get plain configuration as environment variables and every credential as an ECS secret from Secrets Manager. The database URL is assembled by `loadConfig()` from `DATABASE_HOST/PORT/NAME` plus the RDS secret's username and password, with TLS from `DATABASE_SSL`. The deploy pipeline reads its inputs from CloudFormation exports named `<slug>-<env>-<Name>` (for example `lodgent-prod-ClusterName`). The pipeline pushes images tagged with the git SHA, runs the migration task, then deploys with `-c imageTag=<sha>` (ADR 0012). `pnpm cdk:synth` works offline: domain, certificate, hosted zone and alarm email are optional context, and without a domain the ALB serves plain HTTP for smoke tests.

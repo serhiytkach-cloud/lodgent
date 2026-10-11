@@ -8,3 +8,4 @@ export * from './api/visibility';
 export * from './brand';
 export * from './dates';
 export * from './money';
+export * from './schedules';
