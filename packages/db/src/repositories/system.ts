@@ -6,6 +6,7 @@ import { identityRepo } from './identity';
 import { pmsSystemRepo } from './pms';
 import { taxonomyRepo } from './profile';
 import { jobRepo, outboxDispatchRepo } from './queue';
+import { visibilitySystemRepo } from './visibility';
 
 /** Repositories for explicitly cross-tenant work. */
 export function systemRepos(tx: Tx) {
@@ -21,6 +22,7 @@ export function systemRepos(tx: Tx) {
     taxonomy: taxonomyRepo(tx),
     outbox: outboxDispatchRepo(tx),
     jobs: jobRepo(tx),
+    visibility: visibilitySystemRepo(tx),
   };
 }
 

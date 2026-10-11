@@ -17,6 +17,7 @@ import { registerIntegrationRoutes } from './routes/integrations';
 import { registerOrganizationRoutes } from './routes/organizations';
 import { registerProfileRoutes } from './routes/profile';
 import { registerPropertyRoutes } from './routes/properties';
+import { registerVisibilityRoutes } from './routes/visibility';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -91,6 +92,7 @@ export async function buildApp(container: Container): Promise<App> {
   registerProfileRoutes(router, container);
   registerAgentRoutes(router, container);
   registerCheckoutRoutes(router, container);
+  registerVisibilityRoutes(router, container);
   registerMcpEndpoint(server, container);
 
   server.get('/healthz', async () => ({ ok: true, service: `${BRAND.slug}-api` }));

@@ -73,6 +73,17 @@ export function createJobHandlers(container: Container): Record<string, JobHandl
       const { accountId } = z.object({ accountId: z.string().min(1) }).parse(payload);
       await services.paymentAccounts.handleAccountUpdated(accountId);
     },
+    'visibility.schedule-all': async (_payload, ctx) => {
+      const scheduled = await services.visibility.scheduleAll();
+      ctx.logger.info({ scheduled }, 'visibility runs scheduled');
+    },
+    'visibility.run': async (payload) => {
+      const { orgId, runId } = z.object({ orgId: z.uuid(), runId: z.uuid() }).parse(payload);
+      await services.visibility.run(orgId, runId);
+    },
+    'visibility.purge': async () => {
+      await services.visibility.purgeRawAnswers();
+    },
     'privacy.retention': async (_payload, ctx) => {
       const redacted = await services.checkout.redactExpiredGuestData();
       if (redacted > 0) ctx.logger.info({ redacted }, 'guest data redacted');

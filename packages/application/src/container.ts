@@ -3,6 +3,7 @@ import {
   type Clock,
   type EmbeddingModel,
   type ExtractionModel,
+  foldText,
   type IdentityProvider,
   type JobQueue,
   type KeyManagement,
@@ -10,13 +11,19 @@ import {
   type PaymentProvider,
   type PmsProvider,
   systemClock,
+  type VisibilityProvider,
 } from '@lodgent/core';
 import { Database } from '@lodgent/db';
 import {
+  AnthropicVisibilityProvider,
   ClaudeExtractionModel,
+  GeminiVisibilityProvider,
   KeywordExtractionModel,
   LocalHashEmbedding,
   OpenAIEmbedding,
+  OpenAIVisibilityProvider,
+  PerplexityVisibilityProvider,
+  SimulatedVisibilityProvider,
   VoyageEmbedding,
 } from '@lodgent/llm';
 import { StripePaymentProvider } from '@lodgent/payments';
@@ -49,6 +56,7 @@ import { PmsSyncService } from './services/pms-sync';
 import { PmsWebhookService } from './services/pms-webhooks';
 import { ProfileService } from './services/profile';
 import { PropertyService } from './services/properties';
+import { VisibilityService } from './services/visibility';
 import { WebsiteImportService } from './services/website-import';
 
 export interface Adapters {
@@ -66,6 +74,7 @@ export interface Adapters {
   signer: Signer;
   extraction: ExtractionModel;
   embeddings: EmbeddingModel;
+  visibilityProviders: VisibilityProvider[];
 }
 
 export interface Container extends Adapters {
@@ -133,6 +142,15 @@ function createServices(config: AppConfig, a: Adapters) {
       checkout,
       logger: a.logger,
     }),
+    visibility: new VisibilityService({
+      db: a.db,
+      clock: a.clock,
+      providers: a.visibilityProviders,
+      logger: a.logger,
+      webBaseUrl: config.webBaseUrl,
+      defaultMonthlyCapCents: config.business.visibilityDefaultMonthlyCapCents,
+      rawRetentionDays: config.business.visibilityRawRetentionDays,
+    }),
     agent: new AgentService({
       db: a.db,
       clock: a.clock,
@@ -190,6 +208,36 @@ function createServices(config: AppConfig, a: Adapters) {
       logger: a.logger,
     }),
   };
+}
+
+/**
+ * Assistants monitored for AI visibility: every provider with an API key. Without any key (local
+ * development, demos) four deterministic simulated assistants stand in, labelled as such.
+ */
+function visibilityProviders(config: AppConfig, db: Database): VisibilityProvider[] {
+  const { anthropic, openai, gemini, perplexity } = config.llm;
+  const real: VisibilityProvider[] = [
+    ...(anthropic
+      ? [new AnthropicVisibilityProvider({ apiKey: anthropic.apiKey, model: anthropic.model })]
+      : []),
+    ...(openai ? [new OpenAIVisibilityProvider({ apiKey: openai.apiKey, model: openai.model })] : []),
+    ...(gemini ? [new GeminiVisibilityProvider({ apiKey: gemini.apiKey, model: gemini.model })] : []),
+    ...(perplexity
+      ? [new PerplexityVisibilityProvider({ apiKey: perplexity.apiKey, model: perplexity.model })]
+      : []),
+  ];
+  if (real.length > 0 || config.isProduction) return real;
+  // Simulated answers mention published hotels located in the city the question names.
+  const knownHotels = async (question: string) => {
+    const q = foldText(question);
+    const hotels = await db.system(({ catalog }) => catalog.publishedProperties());
+    return hotels
+      .filter((h) => h.city && q.includes(foldText(h.city)))
+      .map((h) => ({ name: h.name, website: h.websiteUrl }));
+  };
+  return (['anthropic', 'openai', 'gemini', 'perplexity'] as const).map(
+    (id) => new SimulatedVisibilityProvider(id, knownHotels),
+  );
 }
 
 /** Composition root: builds every adapter from config. Tests pass `overrides` to swap adapters. */
@@ -302,6 +350,7 @@ export function createContainer(
         : config.llm.embeddings.provider === 'voyage'
           ? new VoyageEmbedding(config.llm.embeddings.apiKey)
           : new LocalHashEmbedding()),
+    visibilityProviders: overrides.visibilityProviders ?? visibilityProviders(config, db),
   };
 
   return {

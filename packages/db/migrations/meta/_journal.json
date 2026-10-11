@@ -85,6 +85,20 @@
       "when": 1791695037757,
       "tag": "0011_bookings_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791696306221,
+      "tag": "0012_visibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791696307168,
+      "tag": "0013_visibility_rls",
+      "breakpoints": true
     }
   ]
 }

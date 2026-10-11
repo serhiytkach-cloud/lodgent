@@ -40,5 +40,12 @@ export type {
   UserRow,
 } from './repositories/tenancy';
 export type { TenantRepos } from './repositories/tenant';
+export type {
+  NewVisibilityResult,
+  VisibilityQueryRow,
+  VisibilityResultRow,
+  VisibilityRunRow,
+  VisibilitySettingsRow,
+} from './repositories/visibility';
 export * as schema from './schema';
 export type { OfferQuoteDetails } from './schema/pms';

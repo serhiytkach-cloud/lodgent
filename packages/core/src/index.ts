@@ -12,3 +12,4 @@ export * from './pricing';
 export * from './profile';
 export * from './ranking';
 export * from './slug';
+export * from './visibility';

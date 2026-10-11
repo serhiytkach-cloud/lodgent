@@ -41,6 +41,18 @@ export const SCHEDULES: Schedule[] = [
     job: { type: 'privacy.retention', payload: {} },
   },
   {
+    name: 'visibility-weekly',
+    everyMinutes: 7 * 1440,
+    expression: 'cron(15 4 ? * MON *)',
+    job: { type: 'visibility.schedule-all', payload: {} },
+  },
+  {
+    name: 'visibility-purge',
+    everyMinutes: 1440,
+    expression: 'cron(45 3 * * ? *)',
+    job: { type: 'visibility.purge', payload: {} },
+  },
+  {
     name: 'offers-cleanup',
     everyMinutes: 60,
     expression: 'rate(1 hour)',

@@ -10,6 +10,7 @@ import {
   outboxRepo,
   propertyRepo,
 } from './tenancy';
+import { visibilityRepo } from './visibility';
 
 /** Repositories bound to one organization. Every query filters by `orgId`; RLS enforces it again. */
 export function tenantRepos(tx: Tx, orgId: string) {
@@ -35,6 +36,7 @@ export function tenantRepos(tx: Tx, orgId: string) {
     bookings: bookingRepo(tx, orgId),
     fees: feeLedgerRepo(tx, orgId),
     paymentAccount: paymentAccountRepo(tx, orgId),
+    visibility: visibilityRepo(tx, orgId),
   };
 }
 

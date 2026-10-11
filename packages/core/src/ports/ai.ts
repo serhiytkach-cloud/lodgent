@@ -52,3 +52,30 @@ export interface EmbeddingModel {
 
 /** Fixed embedding size stored in Postgres (vector(512)). Providers are asked for this dimension. */
 export const EMBEDDING_DIMENSIONS = 512;
+
+/** An AI assistant's answer to a traveller's question, with the web sources it cited. */
+export interface VisibilityAnswer {
+  text: string;
+  citations: { url: string; title: string | null }[];
+  model: string;
+  /** What the call cost, in US cents (exact where the provider reports it, otherwise computed from usage). */
+  costCents: number;
+  searches: number;
+}
+
+export type VisibilityProviderId = 'anthropic' | 'openai' | 'gemini' | 'perplexity' | 'simulated';
+
+/** One assistant whose answers we monitor (in its web-search mode). */
+export interface VisibilityProvider {
+  readonly id: VisibilityProviderId;
+  readonly label: string;
+  readonly model: string;
+  /** Demo data, not a real assistant. */
+  readonly simulated: boolean;
+  /** Upper-bound cost of one question, in US cents, checked against the monthly cap before calling. */
+  estimateCostCents(): number;
+  ask(
+    question: string,
+    options?: { location?: { city: string | null; region: string | null; country: string | null } },
+  ): Promise<VisibilityAnswer>;
+}

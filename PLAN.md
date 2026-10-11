@@ -65,10 +65,10 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [x] Fake Stripe server driven by the real SDK; card-data request guard; PMS reservation changes mirrored; guest-data retention job
 
 ### M6: AI visibility monitor
-- [ ] Auto-suggested target queries (10–20 per property), editable
-- [ ] Scheduled runs across Anthropic, OpenAI, Gemini, Perplexity adapters with web search; per-org monthly cost cap
-- [ ] Response parsing: mention (fuzzy name + domain), rank, competitors, cited sources
-- [ ] Dashboard: share-of-voice trend, per-provider breakdown, competitors, missing queries, recommendations
+- [x] Auto-suggested target queries (up to 10 seeded, 20 active per property), editable
+- [x] Scheduled runs across Anthropic, OpenAI, Gemini, Perplexity adapters with web search; per-org monthly cost cap (ADR 0010)
+- [x] Response parsing: mention (fuzzy name + domain), rank, competitors, cited sources
+- [x] Dashboard: share-of-voice trend, per-provider breakdown, competitors, missing queries, recommendations
 
 ### M7: Bookings & fees dashboard
 - [ ] Funnel: queries → offers → holds → checkouts → paid → reservations, by agent/provider and over time
