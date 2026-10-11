@@ -11,12 +11,13 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@lodgent/application": "workspace:*",
-    "@lodgent/shared": "workspace:*",
+    "pg": "8.23.1",
     "pino": "10.4.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@lodgent/application": "workspace:*",
+    "@lodgent/shared": "workspace:*",
     "@types/node": "^22.19.0",
     "pino-pretty": "13.2.0",
     "tsup": "8.5.1",

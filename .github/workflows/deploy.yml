@@ -1,0 +1,258 @@
+name: Deploy
+
+# Builds the api, worker and web images, pushes them to the environment's ECR repositories (tag =
+# commit SHA), applies database migrations as a one-off ECS task, deploys the CDK stacks with that
+# image tag and smoke-checks the public health endpoints.
+# Setup, rollback and manual migrations: docs/runbooks/deploy.md. Decision: docs/adr/0012.
+#
+# GitHub environments `dev` and `prod` hold the variables: AWS_DEPLOY_ROLE_ARN and AWS_REGION, and
+# optionally CDK_STACKS, CDK_MIGRATION_STACKS, NODE_IMAGE, API_BASE_URL and WEB_BASE_URL. `prod`
+# has required reviewers, so its job waits for an approval before it starts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        type: choice
+        options: [dev, prod]
+        default: dev
+        required: true
+  # Release tags deploy to prod (after approval).
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy per environment at a time, and never cancel one half-way (migrations, CloudFormation).
+  group: deploy-${{ inputs.environment || 'prod' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment || 'prod' }}
+    runs-on: ubuntu-latest
+    # A first deploy creates the database, load balancer and certificates as well.
+    timeout-minutes: 90
+    environment:
+      name: ${{ inputs.environment || 'prod' }}
+      url: ${{ steps.smoke.outputs.web_url }}
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC token for the AWS role
+    env:
+      DEPLOY_ENV: ${{ inputs.environment || 'prod' }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Check ref and configuration
+        env:
+          REF: ${{ github.ref }}
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          REGION: ${{ vars.AWS_REGION }}
+        run: |
+          if [[ $DEPLOY_ENV == prod && $REF != refs/heads/main && $REF != refs/tags/v* ]]; then
+            echo "::error::prod is deployed only from main or a v* tag, not $REF"
+            exit 1
+          fi
+          for name in ROLE_ARN REGION; do
+            if [[ -z ${!name} ]]; then
+              echo "::error::Set the AWS_DEPLOY_ROLE_ARN and AWS_REGION variables on the '$DEPLOY_ENV' environment (docs/runbooks/deploy.md)"
+              exit 1
+            fi
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Resolve names
+        id: names
+        run: |
+          slug=$(node --input-type=module -e "import { BRAND } from './packages/shared/src/brand.ts'; console.log(BRAND.slug)")
+          echo "prefix=$slug-$DEPLOY_ENV" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: deploy-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # Tags are commit SHAs and the repositories are immutable: an image that is already there (a
+      # re-run, or a rollback to an earlier commit) is reused instead of rebuilt.
+      - name: Check ECR repositories
+        id: images
+        env:
+          PREFIX: ${{ steps.names.outputs.prefix }}
+        run: |
+          for app in api worker web; do
+            repo="$PREFIX-$app"
+            if out=$(aws ecr describe-images --repository-name "$repo" --image-ids "imageTag=$IMAGE_TAG" --output json 2>&1); then
+              echo "::notice::$repo:$IMAGE_TAG already exists; reusing it"
+              echo "$app=exists" >> "$GITHUB_OUTPUT"
+            elif grep -q ImageNotFoundException <<<"$out"; then
+              echo "$app=build" >> "$GITHUB_OUTPUT"
+              echo "any=build" >> "$GITHUB_OUTPUT"
+            elif grep -q RepositoryNotFoundException <<<"$out"; then
+              echo "::error::ECR repository $repo does not exist yet: see 'First-time setup' in docs/runbooks/deploy.md"
+              exit 1
+            else
+              echo "$out" >&2
+              exit 1
+            fi
+          done
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.images.outputs.any == 'build'
+
+      # linux/amd64 matches the task definitions' CPU architecture (CDK `cpuArchitecture`, x86_64).
+      # Layers are cached in the GitHub Actions cache, shared with the CI image builds.
+      - name: Build and push api image
+        id: build-api
+        if: steps.images.outputs.api == 'build'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ steps.names.outputs.prefix }}-api:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: ${{ vars.NODE_IMAGE && format('NODE_IMAGE={0}', vars.NODE_IMAGE) || '' }}
+          cache-from: type=gha,scope=image-api
+          cache-to: type=gha,mode=max,scope=image-api,ignore-error=true
+
+      - name: Build and push worker image
+        id: build-worker
+        if: steps.images.outputs.worker == 'build'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ steps.names.outputs.prefix }}-worker:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: ${{ vars.NODE_IMAGE && format('NODE_IMAGE={0}', vars.NODE_IMAGE) || '' }}
+          cache-from: type=gha,scope=image-worker
+          cache-to: type=gha,mode=max,scope=image-worker,ignore-error=true
+
+      - name: Build and push web image
+        id: build-web
+        if: steps.images.outputs.web == 'build'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ steps.names.outputs.prefix }}-web:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: ${{ vars.NODE_IMAGE && format('NODE_IMAGE={0}', vars.NODE_IMAGE) || '' }}
+          cache-from: type=gha,scope=image-web
+          cache-to: type=gha,mode=max,scope=image-web,ignore-error=true
+
+      # Before the services change, so new code never runs against an old schema. Migrations must
+      # therefore keep the previous release working (expand, then contract in a later release).
+      # Exit code 3 means the migration task does not exist yet (first deploy): deploy the stacks
+      # that define it (CDK also deploys the stacks they depend on), migrate, and only then let
+      # the next step create the services, which need the schema to start.
+      - name: Run database migrations
+        id: migrate
+        env:
+          PREFIX: ${{ steps.names.outputs.prefix }}
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ steps.names.outputs.prefix }}-api:${{ github.sha }}
+          STARTED_BY: github-actions/${{ github.run_id }}
+          MIGRATION_STACKS: ${{ vars.CDK_MIGRATION_STACKS }}
+        run: |
+          status=0
+          .github/scripts/ecs-run-migrations.sh "$PREFIX" "$IMAGE" || status=$?
+          if [[ $status -eq 3 ]]; then
+            read -r -a stacks <<<"${MIGRATION_STACKS:-$PREFIX-platform}"
+            echo "::notice::First deploy: deploying ${stacks[*]} before migrating"
+            echo "first_deploy=true" >> "$GITHUB_OUTPUT"
+            pnpm --filter @lodgent/infra exec cdk deploy "${stacks[@]}" \
+              -c "env=$DEPLOY_ENV" -c "imageTag=$IMAGE_TAG" --require-approval never --progress events
+            .github/scripts/ecs-run-migrations.sh "$PREFIX" "$IMAGE"
+          elif [[ $status -ne 0 ]]; then
+            exit "$status"
+          fi
+
+      - name: Deploy CDK stacks
+        env:
+          PREFIX: ${{ steps.names.outputs.prefix }}
+          STACKS: ${{ vars.CDK_STACKS }}
+        run: |
+          # CDK_STACKS: space-separated stack names or patterns; default: every stack of this environment.
+          read -r -a stacks <<<"${STACKS:-$PREFIX-*}"
+          pnpm --filter @lodgent/infra exec cdk deploy "${stacks[@]}" \
+            -c "env=$DEPLOY_ENV" -c "imageTag=$IMAGE_TAG" --require-approval never --progress events
+
+      - name: Smoke check
+        id: smoke
+        env:
+          PREFIX: ${{ steps.names.outputs.prefix }}
+          API_URL: ${{ vars.API_BASE_URL }}
+          WEB_URL: ${{ vars.WEB_BASE_URL }}
+        run: |
+          exports=$(aws cloudformation list-exports --output json)
+          lookup() { jq -r --arg name "$1" '[.Exports[] | select(.Name == $name) | .Value][0] // empty' <<<"$exports"; }
+          api=${API_URL:-$(lookup "$PREFIX-ApiUrl")}
+          web=${WEB_URL:-$(lookup "$PREFIX-WebUrl")}
+          if [[ -z $api || -z $web ]]; then
+            echo "::error::No public URLs: CloudFormation exports $PREFIX-ApiUrl / $PREFIX-WebUrl (or the API_BASE_URL / WEB_BASE_URL variables) are missing"
+            exit 1
+          fi
+          echo "web_url=$web" >> "$GITHUB_OUTPUT"
+          check() {
+            for _ in $(seq 1 20); do
+              if body=$(curl -fsS --max-time 10 "$1") && grep -q '"ok":true' <<<"$body"; then
+                echo "OK  $1"
+                return 0
+              fi
+              sleep 15
+            done
+            echo "::error::$1 did not answer {\"ok\":true}"
+            return 1
+          }
+          check "${api%/}/healthz"
+          check "${api%/}/readyz"
+          check "${web%/}/healthz"
+
+      - name: Summary
+        if: always()
+        env:
+          API_DIGEST: ${{ steps.build-api.outputs.digest }}
+          WORKER_DIGEST: ${{ steps.build-worker.outputs.digest }}
+          WEB_DIGEST: ${{ steps.build-web.outputs.digest }}
+          MIGRATE: ${{ steps.migrate.outcome }}
+          FIRST_DEPLOY: ${{ steps.migrate.outputs.first_deploy }}
+          WEB: ${{ steps.smoke.outputs.web_url }}
+        run: |
+          {
+            echo "### Deploy to $DEPLOY_ENV"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit (image tag) | \`$IMAGE_TAG\` |"
+            echo "| Pushed digests | api ${API_DIGEST:-none}, worker ${WORKER_DIGEST:-none}, web ${WEB_DIGEST:-none} (none: existing image reused, or not built) |"
+            echo "| Migrations | ${MIGRATE:-skipped}${FIRST_DEPLOY:+ (first deploy)} |"
+            echo "| Web | ${WEB:-n/a} |"
+          } >> "$GITHUB_STEP_SUMMARY"
