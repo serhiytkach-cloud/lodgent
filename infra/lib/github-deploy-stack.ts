@@ -52,15 +52,19 @@ export class GithubDeployStack extends Stack {
         }),
       });
 
-      const arn = (service: string, resource: string, resourceName: string, region?: string) =>
-        this.formatArn({ service, resource, resourceName, region });
+      // Everything but IAM is regional: the role acts only in its environment's region.
+      const region = github.envRegions[envName];
+      const arn = (service: string, resource: string, resourceName: string, arnRegion = region) =>
+        this.formatArn({ service, resource, resourceName, region: arnRegion });
       const clusterArn = arn('ecs', 'cluster', names.cluster);
+      // For the few actions without resource-level permissions.
+      const inRegion = { StringEquals: { 'aws:RequestedRegion': region } };
 
       role.addToPolicy(
         new iam.PolicyStatement({
           sid: 'AssumeCdkBootstrapRoles',
           actions: ['sts:AssumeRole', 'sts:TagSession'],
-          resources: [arn('iam', 'role', `cdk-${github.cdkQualifier}-*-${this.account}-${this.region}`, '')],
+          resources: [arn('iam', 'role', `cdk-${github.cdkQualifier}-*-${this.account}-${region}`, '')],
         }),
       );
       role.addToPolicy(
@@ -68,6 +72,7 @@ export class GithubDeployStack extends Stack {
           sid: 'EcrLogin',
           actions: ['ecr:GetAuthorizationToken'],
           resources: ['*'],
+          conditions: inRegion,
         }),
       );
       role.addToPolicy(
@@ -100,6 +105,7 @@ export class GithubDeployStack extends Stack {
             'ecs:DeregisterTaskDefinition',
           ],
           resources: ['*'],
+          conditions: inRegion,
         }),
       );
       role.addToPolicy(
@@ -142,6 +148,7 @@ export class GithubDeployStack extends Stack {
           resources: [
             this.formatArn({
               service: 'logs',
+              region,
               resource: 'log-group',
               resourceName: `${names.logGroup('migrate')}:*`,
               arnFormat: ArnFormat.COLON_RESOURCE_NAME,
@@ -162,6 +169,7 @@ export class GithubDeployStack extends Stack {
           // ListExports has no resource-level permissions.
           actions: ['cloudformation:ListExports'],
           resources: ['*'],
+          conditions: inRegion,
         }),
       );
       this.roles[envName] = role;

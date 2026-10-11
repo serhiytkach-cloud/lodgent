@@ -1,5 +1,5 @@
 import { SCHEDULES } from '@lodgent/shared';
-import { Match } from 'aws-cdk-lib/assertions';
+import { Annotations, Match } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { API_PATH_PATTERNS } from '../lib/edge';
@@ -112,6 +112,13 @@ describe('container registries', () => {
         expect(repo.Properties.LifecyclePolicy).toBeDefined();
       }
     }
+  });
+
+  it('warns when the services would deploy the default tag', () => {
+    const warnings = (s: Synthesized) =>
+      Annotations.fromStack(s.env('prod').services).findWarning('*', Match.stringLikeRegexp('imageTag'));
+    expect(warnings(app)).toHaveLength(1);
+    expect(warnings(synth({ imageTag: '0123abc' }))).toHaveLength(0);
   });
 
   it('deploys the image tag from context (default "latest")', () => {
@@ -340,6 +347,20 @@ describe('alarms', () => {
     // CPU, memory and running tasks per service (the unnamed ones belong to step scaling).
     expect(serviceAlarms).toHaveLength(9);
     services.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
+  });
+
+  it('does not alarm on "no running task" for a service pinned at zero', () => {
+    const pinned = synth({ env: 'dev', 'dev.worker.minCount': '0' });
+    const names = Object.values(
+      resources(pinned.template(pinned.env('dev').services), 'AWS::CloudWatch::Alarm'),
+    )
+      .map((a) => a.Properties.AlarmName)
+      .filter((n): n is string => typeof n === 'string' && n.endsWith('-no-running-tasks'));
+    expect(names.sort()).toEqual(['lodgent-dev-api-no-running-tasks', 'lodgent-dev-web-no-running-tasks']);
+    const worker = Object.values(
+      resources(pinned.template(pinned.env('dev').services), 'AWS::ECS::Service'),
+    ).find((svc) => JSON.stringify(svc.Properties.TaskDefinition).includes('WorkerTaskDefinition'))!;
+    expect(worker.Properties.DesiredCount).toBe(0);
   });
 
   it('subscribes the alarm email from context', () => {

@@ -17,6 +17,7 @@ import type { DataStack } from './data-stack';
 import { Edge } from './edge';
 import type { NetworkStack } from './network-stack';
 import {
+  APP_CONTAINER_USER,
   type AppService,
   allowSecretDecryption,
   appLogDriver,
@@ -129,6 +130,7 @@ export class PlatformStack extends Stack {
       environment: { APP_ENV: 'production', LOG_LEVEL: 'info', ...databaseEnvironment(config, data) },
       secrets: databaseSecrets(this, data),
       logging: appLogDriver(this.logGroups.migrate, 'migrate'),
+      user: APP_CONTAINER_USER,
       readonlyRootFilesystem: true,
     });
     migrate.addMountPoints({ sourceVolume: 'tmp', containerPath: '/tmp', readOnly: false });

@@ -92,7 +92,8 @@ const EnvSettings = z.object({
   ),
   /** Cognito threat protection (needs the Plus feature plan, billed per MAU). */
   cognitoThreatProtection: z.enum(['off', 'audit', 'enforced']),
-  natGateways: intIn(1, 3),
+  /** NAT gateways (the VPC spans two AZs): 1 is cheaper, 2 survives the loss of an AZ. */
+  natGateways: intIn(1, 2),
   /** Interface VPC endpoints for SQS, Secrets Manager, ECR, Logs and KMS (~$7.50 per endpoint per AZ per month). */
   interfaceEndpoints: boolish,
   flowLogTraffic: z.enum(['ALL', 'REJECT']),
@@ -227,7 +228,10 @@ export interface GithubConfig {
   envs: EnvName[];
   oidcProviderArn?: string;
   cdkQualifier: string;
+  /** Region of the GitHub deploy stack itself (IAM is global; the stack needs one). */
   region: string;
+  /** Region each environment is deployed to: its role may act only there. */
+  envRegions: Record<EnvName, string>;
 }
 
 export class ConfigError extends Error {}
@@ -334,8 +338,11 @@ function envRegion(node: Node, envName: EnvName): string {
   return region;
 }
 
+/** Tag used when no `imageTag` context is given, so `cdk synth` works without one. */
+export const DEFAULT_IMAGE_TAG = 'latest';
+
 function imageTag(node: Node): string {
-  const tag = contextString(node, 'imageTag') ?? 'latest';
+  const tag = contextString(node, 'imageTag') ?? DEFAULT_IMAGE_TAG;
   if (!/^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/.test(tag))
     throw new ConfigError(`imageTag "${tag}" is not a valid tag`);
   return tag;
@@ -398,5 +405,9 @@ export function loadGithubConfig(node: Node): GithubConfig {
     region: contextString(node, 'region') ?? DEFAULT_REGION,
   });
   if (!parsed.success) throw new ConfigError(formatIssues(parsed.error, 'github'));
-  return parsed.data;
+  const envRegions = Object.fromEntries(ENV_NAMES.map((env) => [env, envRegion(node, env)])) as Record<
+    EnvName,
+    string
+  >;
+  return { ...parsed.data, envRegions };
 }

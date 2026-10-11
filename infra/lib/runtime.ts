@@ -14,6 +14,12 @@ export const OTLP_ENDPOINT = 'http://localhost:4318';
 
 export type AppService = 'api' | 'worker' | 'web';
 
+/**
+ * User the app containers run as: the images' unprivileged `node` user (`USER 1000:1000`). Set in the
+ * task definitions too, so a task never runs as root even if an image regresses.
+ */
+export const APP_CONTAINER_USER = '1000:1000';
+
 /** OpenTelemetry service names (OTEL_SERVICE_NAME). */
 export function otelServiceName(config: EnvConfig, service: AppService): string {
   return `${config.slug}-${service}`;

@@ -1,7 +1,8 @@
 import { Match } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { APP_SECRET_KEYS } from '../lib/data-stack';
+import { APP_SECRET_KEYS, APP_SECRET_TEMPLATE_KEYS } from '../lib/data-stack';
 import { DB_PORT } from '../lib/network-stack';
+import { APP_CONTAINER_USER } from '../lib/runtime';
 import {
   actionsOf,
   container,
@@ -42,12 +43,14 @@ describe('database', () => {
       }
     });
 
-    it(`${env}: forces TLS through the parameter group`, () => {
+    it(`${env}: forces TLS and keeps bind parameters (guest PII) out of the logs`, () => {
       const data = app.template(app.env(env).data);
       data.hasResourceProperties('AWS::RDS::DBParameterGroup', {
         Family: 'postgres16',
-        Parameters: Match.objectLike({ 'rds.force_ssl': '1' }),
+        Parameters: Match.objectLike({ 'rds.force_ssl': '1', log_parameter_max_length: '0' }),
       });
+      const db = only(resources(data, 'AWS::RDS::DBInstance'));
+      expect(JSON.stringify(db.Properties.DBParameterGroupName)).toContain('DatabaseParameters');
     });
 
     it(`${env}: only the api, worker and one-off task security groups reach PostgreSQL`, () => {
@@ -278,6 +281,8 @@ describe('ECS tasks', () => {
       for (const c of all) {
         expect(c.Privileged, c.Name).toBeFalsy();
         expect(c.LinuxParameters?.Capabilities?.Add ?? [], c.Name).toEqual([]);
+        // The app containers run as the images' unprivileged user, never root.
+        if (c.Name !== 'otel-collector') expect(c.User, c.Name).toBe(APP_CONTAINER_USER);
       }
     }
   });
@@ -396,6 +401,29 @@ describe('task roles (least privilege)', () => {
 });
 
 describe('app secret', () => {
+  it('has a frozen creation template (changing it would regenerate the whole secret)', () => {
+    // Deliberately a literal: CloudFormation writes a new secret value, wiping the operator's
+    // credentials, whenever GenerateSecretString changes. Add new keys by hand (runbook) instead.
+    expect(APP_SECRET_TEMPLATE_KEYS).toEqual([
+      'INTERNAL_API_TOKEN',
+      'SIGNING_SECRET',
+      'AUTH_DEV_SECRET',
+      'APALEO_CLIENT_ID',
+      'APALEO_CLIENT_SECRET',
+      'APALEO_WEBHOOK_TOKEN',
+      'STRIPE_SECRET_KEY',
+      'STRIPE_PUBLISHABLE_KEY',
+      'STRIPE_WEBHOOK_SECRET',
+      'STRIPE_CONNECT_WEBHOOK_SECRET',
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'GEMINI_API_KEY',
+      'PERPLEXITY_API_KEY',
+      'VOYAGE_API_KEY',
+      'COGNITO_CLIENT_SECRET',
+    ]);
+  });
+
   it('is created with every key and no values except the generated signing secret', () => {
     for (const env of ['dev', 'prod'] as const) {
       const data = app.template(app.env(env).data);
@@ -408,8 +436,11 @@ describe('app secret', () => {
       };
       const template = JSON.parse(generate.SecretStringTemplate) as Record<string, string>;
       expect([...Object.keys(template), generate.GenerateStringKey].sort()).toEqual(
-        [...APP_SECRET_KEYS].sort(),
+        [...APP_SECRET_TEMPLATE_KEYS].sort(),
       );
+      expect(generate.GenerateStringKey).toBe('SIGNING_SECRET');
+      // Today every key the tasks reference is created by the template.
+      for (const key of APP_SECRET_KEYS) expect(APP_SECRET_TEMPLATE_KEYS).toContain(key);
       expect(Object.values(template).every((value) => value === '')).toBe(true);
       expect(secret.Properties).not.toHaveProperty('SecretString');
     }

@@ -82,6 +82,30 @@ describe('GitHub deploy roles', () => {
     expect(actions).not.toContain('iam:CreateRole');
   });
 
+  it("scopes each role to its environment's region", () => {
+    const split = synth({ region: 'eu-central-1', 'prod.region': 'eu-west-1' });
+    const template = split.template(split.stacks.github);
+    const policyFor = (env: string) => {
+      const id = Object.entries(resources(template, 'AWS::IAM::Role')).find(
+        ([, r]) => r.Properties.RoleName === `lodgent-${env}-github-deploy`,
+      )![0];
+      return statementsForRole(template, id);
+    };
+    for (const [env, region, other] of [
+      ['prod', 'eu-west-1', 'eu-central-1'],
+      ['dev', 'eu-central-1', 'eu-west-1'],
+    ] as const) {
+      const statements = policyFor(env);
+      const json = JSON.stringify(statements);
+      expect(json).toContain(`-${region}`); // the CDK bootstrap roles of that region
+      expect(json).not.toContain(other);
+      for (const s of statements.filter((st) => st.Resource === '*')) {
+        expect(s.Condition, String(s.Sid)).toEqual({ StringEquals: { 'aws:RequestedRegion': region } });
+      }
+      expect(JSON.stringify(statements.find((st) => st.Sid === 'PushImages'))).toContain(`:ecr:${region}:`);
+    }
+  });
+
   it('honours githubRepo, githubDeployEnvs and an existing OIDC provider', () => {
     const custom = synth({
       githubRepo: 'acme/booking',
@@ -153,6 +177,8 @@ describe('context validation', () => {
     [{ 'dev.api.cpu': '512', 'dev.api.memoryMiB': '512' }, /Fargate/],
     [{ 'dev.api.minCount': '3', 'dev.api.maxCount': '2' }, /minCount/],
     [{ 'dev.logRetentionDays': '10' }, /retention/],
+    [{ 'dev.natGateways': '3' }, /natGateways/],
+    [{ 'dev.cognitoThreatProtection': 'max' }, /cognitoThreatProtection/],
     [{ 'dev.alarmEmail': 'nope' }, /alarmEmail/],
     [{ imageTag: 'bad tag!' }, /imageTag/],
   ])('rejects invalid context %j', (context, message) => {

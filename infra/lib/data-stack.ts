@@ -15,10 +15,10 @@ import type { EnvConfig } from './config';
 import { DB_PORT, type NetworkStack } from './network-stack';
 
 /**
- * Keys of the app secret `<slug>/<env>/app` (JSON). CDK creates the secret with every key present
- * (SIGNING_SECRET is generated, the rest are empty strings); the operator fills in the values after
- * the data stack is deployed. ECS refuses to start a task whose secret lacks a referenced key, so
- * keep this list and the secret in step.
+ * Keys of the app secret `<slug>/<env>/app` (JSON) that the tasks reference as ECS secrets. The
+ * operator fills in the values after the data stack is deployed. ECS refuses to start a task whose
+ * secret lacks a referenced key: to add a key, add it to the existing secret first (runbook), then
+ * here. Do not add it to APP_SECRET_TEMPLATE_KEYS.
  */
 export const APP_SECRET_KEYS = [
   'INTERNAL_API_TOKEN',
@@ -40,8 +40,31 @@ export const APP_SECRET_KEYS = [
 ] as const;
 export type AppSecretKey = (typeof APP_SECRET_KEYS)[number];
 
-/** The app secret key CloudFormation generates (64 random alphanumerics) on creation. */
-const GENERATED_APP_SECRET_KEY: AppSecretKey = 'SIGNING_SECRET';
+/**
+ * The JSON keys CloudFormation writes when it creates the app secret: SIGNING_SECRET is generated
+ * (64 random alphanumerics), the others are empty strings. FROZEN: CloudFormation generates a new
+ * value for the whole secret whenever GenerateSecretString changes, which would wipe the operator's
+ * values. That is why this is a separate list from APP_SECRET_KEYS.
+ */
+export const APP_SECRET_TEMPLATE_KEYS: readonly string[] = [
+  'INTERNAL_API_TOKEN',
+  'SIGNING_SECRET',
+  'AUTH_DEV_SECRET',
+  'APALEO_CLIENT_ID',
+  'APALEO_CLIENT_SECRET',
+  'APALEO_WEBHOOK_TOKEN',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_PUBLISHABLE_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_CONNECT_WEBHOOK_SECRET',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
+  'PERPLEXITY_API_KEY',
+  'VOYAGE_API_KEY',
+  'COGNITO_CLIENT_SECRET',
+];
+const GENERATED_APP_SECRET_KEY = 'SIGNING_SECRET';
 
 export interface DataStackProps extends StackProps {
   config: EnvConfig;
@@ -99,7 +122,7 @@ export class DataStack extends Stack {
 
     // ---- App secret ------------------------------------------------------------------------------
     const template = Object.fromEntries(
-      APP_SECRET_KEYS.filter((key) => key !== GENERATED_APP_SECRET_KEY).map((key) => [key, '']),
+      APP_SECRET_TEMPLATE_KEYS.filter((key) => key !== GENERATED_APP_SECRET_KEY).map((key) => [key, '']),
     );
     this.appSecret = new secretsmanager.Secret(this, 'AppSecret', {
       secretName: names.appSecret,
@@ -122,6 +145,9 @@ export class DataStack extends Stack {
       parameters: {
         'rds.force_ssl': '1',
         log_min_duration_statement: '1000',
+        // Slow-statement logs keep the SQL text but not the bind parameters (guest PII, tokens).
+        // Error logs omit them by default (log_parameter_max_length_on_error = 0).
+        log_parameter_max_length: '0',
         log_lock_waits: '1',
         idle_in_transaction_session_timeout: '300000',
       },

@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
+import { Annotations, CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
 import * as appscaling from 'aws-cdk-lib/aws-applicationautoscaling';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
@@ -8,11 +8,12 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as servicediscovery from 'aws-cdk-lib/aws-servicediscovery';
 import type { Construct } from 'constructs';
-import type { EnvConfig, ServiceSize } from './config';
+import { DEFAULT_IMAGE_TAG, type EnvConfig, type ServiceSize } from './config';
 import { APP_SECRET_KEYS, type AppSecretKey, type DataStack } from './data-stack';
 import { API_PORT, type NetworkStack, WEB_PORT } from './network-stack';
 import type { PlatformStack } from './platform-stack';
 import {
+  APP_CONTAINER_USER,
   type AppService,
   addTelemetrySidecar,
   allowSecretDecryption,
@@ -61,6 +62,13 @@ export class ServicesStack extends Stack {
     const { names } = config;
     const sgs = network.securityGroups;
     const { edge } = platform;
+
+    if (config.imageTag === DEFAULT_IMAGE_TAG) {
+      Annotations.of(this).addWarningV2(
+        'lodgent:default-image-tag',
+        `No imageTag context: the services use ":${DEFAULT_IMAGE_TAG}", which the pipeline never pushes (tags are git SHAs). Deploy with -c imageTag=<sha>.`,
+      );
+    }
 
     const forbidden = Object.keys(config.appEnvironment).filter(
       (key) => (APP_SECRET_KEYS as readonly string[]).includes(key) || key.startsWith('DATABASE_'),
@@ -113,6 +121,7 @@ export class ServicesStack extends Stack {
       secrets: { ...databaseSecrets(this, data), ...appSecrets(this, data, API_WORKER_SECRET_KEYS) },
       portMappings: [{ containerPort: API_PORT, name: 'http', appProtocol: ecs.AppProtocol.http }],
       logging: appLogDriver(platform.logGroups.api, 'api'),
+      user: APP_CONTAINER_USER,
       readonlyRootFilesystem: true,
       stopTimeout: Duration.seconds(30),
     });
@@ -127,6 +136,7 @@ export class ServicesStack extends Stack {
       environment: appEnvironment('worker'),
       secrets: { ...databaseSecrets(this, data), ...appSecrets(this, data, API_WORKER_SECRET_KEYS) },
       logging: appLogDriver(platform.logGroups.worker, 'worker'),
+      user: APP_CONTAINER_USER,
       readonlyRootFilesystem: true,
       // Lets a running job finish (SQS long poll is 20 s); unfinished jobs are redelivered.
       stopTimeout: Duration.seconds(120),
@@ -158,6 +168,7 @@ export class ServicesStack extends Stack {
       secrets: appSecrets(this, data, WEB_SECRET_KEYS),
       portMappings: [{ containerPort: WEB_PORT, name: 'http', appProtocol: ecs.AppProtocol.http }],
       logging: appLogDriver(platform.logGroups.web, 'web'),
+      user: APP_CONTAINER_USER,
       // Next.js writes its cache under .next/cache, so the root filesystem stays writable here.
       readonlyRootFilesystem: false,
       stopTimeout: Duration.seconds(30),
@@ -295,7 +306,7 @@ export class ServicesStack extends Stack {
 
   private createAlarms(config: EnvConfig, platform: PlatformStack): void {
     const action = new cwActions.SnsAction(platform.alarmTopic);
-    for (const [name, svc] of Object.entries(this.services)) {
+    for (const [name, svc] of Object.entries(this.services) as [AppService, ecs.FargateService][]) {
       const alarms = [
         new cloudwatch.Alarm(this, `${title(name)}CpuAlarm`, {
           alarmName: `${config.names.prefix}-${name}-cpu`,
@@ -315,22 +326,27 @@ export class ServicesStack extends Stack {
           comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
           treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
         }),
-        new cloudwatch.Alarm(this, `${title(name)}NoRunningTasksAlarm`, {
-          alarmName: `${config.names.prefix}-${name}-no-running-tasks`,
-          alarmDescription: `${name} has had no running task for 10 minutes.`,
-          metric: new cloudwatch.Metric({
-            namespace: 'ECS/ContainerInsights',
-            metricName: 'RunningTaskCount',
-            dimensionsMap: { ClusterName: platform.cluster.clusterName, ServiceName: svc.serviceName },
-            statistic: 'Minimum',
-            period: Duration.minutes(5),
-          }),
-          threshold: 1,
-          evaluationPeriods: 2,
-          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-        }),
       ];
+      // A service deliberately pinned at zero tasks (minCount 0) is not an outage.
+      if (config[name].minCount > 0) {
+        alarms.push(
+          new cloudwatch.Alarm(this, `${title(name)}NoRunningTasksAlarm`, {
+            alarmName: `${config.names.prefix}-${name}-no-running-tasks`,
+            alarmDescription: `${name} has had no running task for 10 minutes.`,
+            metric: new cloudwatch.Metric({
+              namespace: 'ECS/ContainerInsights',
+              metricName: 'RunningTaskCount',
+              dimensionsMap: { ClusterName: platform.cluster.clusterName, ServiceName: svc.serviceName },
+              statistic: 'Minimum',
+              period: Duration.minutes(5),
+            }),
+            threshold: 1,
+            evaluationPeriods: 2,
+            comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+            treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+          }),
+        );
+      }
       for (const alarm of alarms) {
         alarm.addAlarmAction(action);
         alarm.addOkAction(action);
