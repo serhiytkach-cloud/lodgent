@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "infra"
+  - "scripts"
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - cpu-features
+  - ssh2
+  - protobufjs
+  - unrs-resolver

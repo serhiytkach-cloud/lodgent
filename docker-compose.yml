@@ -1,0 +1,42 @@
+# Local infrastructure for development. The apps themselves run natively with `pnpm dev`.
+#   docker compose up -d
+#   pnpm dev
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16
+    environment:
+      POSTGRES_USER: lodgent
+      POSTGRES_PASSWORD: lodgent
+      POSTGRES_DB: lodgent
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lodgent -d lodgent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # SQS, KMS and SES emulation. Only used when QUEUE_PROVIDER=sqs / KMS_PROVIDER=aws locally;
+  # the default local adapters (Postgres queue, local KMS, SMTP) don't need it.
+  # 4.12.0 is pinned because later images require a LocalStack auth token.
+  localstack:
+    image: localstack/localstack:4.12.0
+    environment:
+      SERVICES: sqs,kms,ses,scheduler
+      AWS_DEFAULT_REGION: eu-central-1
+    ports:
+      - "${LOCALSTACK_PORT:-4566}:4566"
+    volumes:
+      - ./docker/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+
+  # Catches every email sent locally. UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.29
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
+volumes:
+  postgres-data:

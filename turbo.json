@@ -1,0 +1,43 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "agentGuidance": false,
+  "ui": "stream",
+  "globalDependencies": [
+    "tsconfig.base.json"
+  ],
+  "globalPassThroughEnv": [
+    "*"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**",
+        "cdk.out/**"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": [],
+      "outputs": [],
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "synth": {
+      "outputs": [
+        "cdk.out/**"
+      ],
+      "cache": false
+    }
+  }
+}
