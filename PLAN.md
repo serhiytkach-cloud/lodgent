@@ -82,6 +82,22 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [ ] Security pass: authorization tests on every route, input validation, SSRF, secrets scanning, dependency audit
 - [ ] Privacy: PII minimization, retention purge job, guest data export/delete endpoints
 
+### Order from here
+M8 (hardening) and the production deployment layer → M10 Mews → M11 Cloudbeds → M9 demo & verification (the demo seed and end-to-end tests cover all three PMSs).
+
+### M10: Mews PMS (owner decisions, 2026-10-11)
+- [ ] Generalize the PMS layer: connection methods beyond OAuth (static per-hotel tokens), a shared adapter contract test suite, and mixed PMSs per organization (each property linked to exactly one PMS connection)
+- [ ] Mews Connector API adapter (server-side integration; the Booking Engine API is browser-facing with anti-scraping): ClientToken (Lodgent) + per-hotel AccessToken; properties, room types (resource categories), rates and all-in pricing, availability, reservations, cancellations, external payments, reservation webhooks plus polling reconciliation
+- [ ] Connect flow: "Connect Mews" shows a one-time code and sends the hotel to the Mews Marketplace; the IntegrationCreated webhook delivers the AccessToken (KMS-encrypted); paste-the-token fallback
+- [ ] Payments: Stripe for every PMS (prepaid charged on the hotel's Stripe and recorded in Mews as an external payment; pay-at-hotel keeps the card in the hotel's Stripe)
+- [ ] Fake Mews server for local dev and tests; ADR with the docs check; partner application and certification steps in SETUP-NEEDED (not a Mews partner yet: Mews is off in production until a ClientToken exists)
+
+### M11: Cloudbeds PMS (owner decisions, 2026-10-11)
+- [ ] Cloudbeds API adapter on the generalized PMS layer (US market focus: USD, all-in prices including mandatory fees)
+- [ ] Connect flow: API key delivered through the Cloudbeds Marketplace (Cloudbeds' preferred method), paste fallback; keys KMS-encrypted
+- [ ] Payments: Stripe, as for every PMS
+- [ ] Fake Cloudbeds server; ADR with the docs check; partner application and certification test plan in SETUP-NEEDED (not a partner yet: off in production until credentials exist)
+
 ### M9: Demo & verification
 - [ ] Seed: demo org with three boutique hotels on fake Apaleo data
 - [ ] Playwright e2e: onboarding → approval → publish → agent-sim hold → checkout → reservation → booking and fee in dashboard
