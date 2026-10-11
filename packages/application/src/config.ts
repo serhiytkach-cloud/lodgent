@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 
+const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 const blank = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
 const optionalString = z.preprocess(blank, z.string().optional());
 const optionalUrl = z.preprocess(blank, z.url().optional());
@@ -34,7 +36,17 @@ const EnvSchema = z.object({
    * Alternative to DATABASE_URL, used on AWS where ECS injects the RDS secret's username and
    * password separately. When DATABASE_HOST is set, the URL is built from these parts.
    */
-  DATABASE_HOST: optionalString,
+  DATABASE_HOST: z.preprocess(
+    blank,
+    z
+      .string()
+      .trim()
+      // A host name or IP address only, so the value cannot smuggle in credentials, a port or a path.
+      .refine((host) => HOST_NAME.test(host) || isIP(host.replace(/^\[(.*)\]$/, '$1')) !== 0, {
+        message: 'must be a host name or IP address',
+      })
+      .optional(),
+  ),
   DATABASE_PORT: z.preprocess(blank, z.coerce.number().int().min(1).max(65535).default(5432)),
   DATABASE_NAME: optionalString,
   DATABASE_USER: optionalString,
@@ -321,20 +333,20 @@ function assertProductionReady(config: AppConfig): void {
 }
 
 /**
- * DATABASE_URL, or a URL built from DATABASE_HOST/PORT/NAME/USER/PASSWORD when DATABASE_HOST is set.
- * User, password and database name are percent-encoded, so generated passwords with reserved
- * characters survive. With DATABASE_SSL the URL also carries `sslmode=verify-full`, so code that
- * only receives the URL (the migration runner) still negotiates TLS and verifies the server
- * certificate (RDS enforces TLS with rds.force_ssl=1).
+ * DATABASE_URL, or a URL built from DATABASE_HOST/PORT/NAME/USER/PASSWORD when DATABASE_HOST is set
+ * (on ECS the user and password come from the RDS secret). User, password and database name are
+ * percent-encoded, so generated passwords with reserved characters survive. TLS stays governed by
+ * DATABASE_SSL (`database.ssl`) exactly as with DATABASE_URL: the URL carries no `sslmode`, because
+ * node-postgres lets connection-string SSL settings override the explicit `ssl` options.
  */
 function databaseUrl(e: Env): string {
   if (!e.DATABASE_HOST) return e.DATABASE_URL;
-  const host = e.DATABASE_HOST.includes(':') ? `[${e.DATABASE_HOST}]` : e.DATABASE_HOST;
+  const bare = e.DATABASE_HOST.replace(/^\[(.*)\]$/, '$1');
+  const host = isIP(bare) === 6 ? `[${bare}]` : bare;
   const user = encodeURIComponent(required(e.DATABASE_USER, 'DATABASE_USER'));
   const password = encodeURIComponent(required(e.DATABASE_PASSWORD, 'DATABASE_PASSWORD'));
   const name = encodeURIComponent(required(e.DATABASE_NAME, 'DATABASE_NAME'));
-  const query = e.DATABASE_SSL ? '?sslmode=verify-full' : '';
-  return `postgres://${user}:${password}@${host}:${e.DATABASE_PORT}/${name}${query}`;
+  return `postgres://${user}:${password}@${host}:${e.DATABASE_PORT}/${name}`;
 }
 
 function required(value: string | undefined, name: string): string {

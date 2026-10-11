@@ -1,17 +1,11 @@
+import { parse } from 'pg-connection-string';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadConfig } from '../src/config';
 
-/** Parses a connection URL the way pg-connection-string does (WHATWG URL + decodeURIComponent). */
+/** Parses the URL with the parser node-postgres uses, so the test proves what the pool will see. */
 function parsePg(url: string) {
-  const parsed = new URL(url);
-  return {
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    host: parsed.hostname,
-    port: parsed.port,
-    database: decodeURI(parsed.pathname.slice(1)),
-    sslmode: parsed.searchParams.get('sslmode'),
-  };
+  const { user, password, host, port, database, ssl } = parse(url);
+  return { user, password, host, port, database, ssl };
 }
 
 const parts = {
@@ -19,7 +13,8 @@ const parts = {
   DATABASE_PORT: '5432',
   DATABASE_NAME: 'lodgent',
   DATABASE_USER: 'lodgent_admin',
-  DATABASE_PASSWORD: 'p@ss:w/rd?#%41&=+ ',
+  // Characters with a meaning in URLs, plus a literal "%41" that must not be decoded to "A".
+  DATABASE_PASSWORD: 'p@ss:w/rd?#%41&=+ ~[]',
 };
 
 describe('database configuration', () => {
@@ -41,18 +36,18 @@ describe('database configuration', () => {
     const config = loadConfig({ ...parts, DATABASE_URL: 'postgres://ignored@elsewhere/x' });
     expect(parsePg(config.database.url)).toEqual({
       user: 'lodgent_admin',
-      password: 'p@ss:w/rd?#%41&=+ ',
+      password: parts.DATABASE_PASSWORD,
       host: parts.DATABASE_HOST,
       port: '5432',
       database: 'lodgent',
-      sslmode: null,
+      ssl: undefined,
     });
   });
 
   it('percent-encodes reserved characters in the user and password', () => {
     const { database } = loadConfig({ ...parts, DATABASE_USER: 'app:user@x' });
-    expect(database.url).toContain('app%3Auser%40x:p%40ss%3Aw%2Frd%3F%23%2541%26%3D%2B%20@');
-    expect(parsePg(database.url).user).toBe('app:user@x');
+    expect(database.url).toContain('//app%3Auser%40x:p%40ss%3Aw%2Frd%3F%23%2541%26%3D%2B%20~%5B%5D@');
+    expect(parsePg(database.url)).toMatchObject({ user: 'app:user@x', password: parts.DATABASE_PASSWORD });
   });
 
   it('defaults the port to 5432 and honours an explicit one', () => {
@@ -62,10 +57,22 @@ describe('database configuration', () => {
     expect(parsePg(custom.database.url).port).toBe('6432');
   });
 
-  it('requires TLS with full verification in the URL when DATABASE_SSL is on', () => {
-    const config = loadConfig({ ...parts, DATABASE_SSL: 'true' });
-    expect(config.database.ssl).toBe(true);
-    expect(parsePg(config.database.url).sslmode).toBe('verify-full');
+  it('accepts IP addresses, bracketing IPv6', () => {
+    expect(parsePg(loadConfig({ ...parts, DATABASE_HOST: '10.0.3.17' }).database.url).host).toBe('10.0.3.17');
+    for (const host of ['fd00::17', '[fd00::17]']) {
+      const { url } = loadConfig({ ...parts, DATABASE_HOST: host }).database;
+      expect(url).toContain('@[fd00::17]:5432/');
+      expect(parsePg(url).host).toBe('fd00::17');
+    }
+  });
+
+  it('leaves TLS to DATABASE_SSL, as with DATABASE_URL (no sslmode in the URL)', () => {
+    const tls = loadConfig({ ...parts, DATABASE_SSL: 'true' }).database;
+    expect(tls.ssl).toBe(true);
+    // node-postgres would let a URL sslmode replace the pool's explicit `ssl` options.
+    expect(new URL(tls.url).search).toBe('');
+    expect(parsePg(tls.url).ssl).toBeUndefined();
+    expect(loadConfig(parts).database.ssl).toBe(false);
   });
 
   it('refuses incomplete parts', () => {
@@ -73,5 +80,33 @@ describe('database configuration', () => {
     expect(() => loadConfig({ ...parts, DATABASE_USER: '' })).toThrow(/DATABASE_USER/);
     expect(() => loadConfig({ ...parts, DATABASE_NAME: undefined })).toThrow(ConfigError);
     expect(() => loadConfig({ ...parts, DATABASE_PORT: 'not-a-port' })).toThrow(ConfigError);
+    expect(() => loadConfig({ ...parts, DATABASE_PORT: '70000' })).toThrow(ConfigError);
+  });
+
+  it('refuses a host that carries credentials, a port or a path', () => {
+    for (const host of ['evil@db.internal', 'db.internal:5433', 'db.internal/other', 'db internal']) {
+      expect(() => loadConfig({ ...parts, DATABASE_HOST: host }), host).toThrow(/DATABASE_HOST/);
+    }
+  });
+
+  it('builds the URL in production with the parts ECS injects', () => {
+    const config = loadConfig({
+      ...parts,
+      APP_ENV: 'production',
+      DATABASE_SSL: 'true',
+      AUTH_PROVIDER: 'cognito',
+      COGNITO_USER_POOL_ID: 'eu-central-1_abc',
+      COGNITO_CLIENT_ID: 'client',
+      KMS_PROVIDER: 'aws',
+      KMS_KEY_ID: 'arn:aws:kms:eu-central-1:111122223333:key/abc',
+      INTERNAL_API_TOKEN: 'internal-token-for-tests',
+      SIGNING_SECRET: 'signing-secret-for-tests-0123456789abcdef',
+      STRIPE_SECRET_KEY: 'sk_test_not_a_real_key',
+      STRIPE_WEBHOOK_SECRET: 'whsec_not_a_real_secret',
+      APALEO_CLIENT_ID: 'apaleo-client',
+      APALEO_WEBHOOK_TOKEN: 'apaleo-webhook-token-for-tests',
+    });
+    expect(config.database).toMatchObject({ ssl: true });
+    expect(parsePg(config.database.url)).toMatchObject({ host: parts.DATABASE_HOST, user: 'lodgent_admin' });
   });
 });
