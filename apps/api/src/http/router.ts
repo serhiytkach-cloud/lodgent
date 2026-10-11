@@ -10,6 +10,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { type AgentContext, resolveAgent } from './agent-auth';
+import { agentRateLimit } from './rate-limit';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -91,33 +92,21 @@ export class Router {
   add<M extends AuthMode, P, Q, B, R>(def: RouteDef<M, P, Q, B, R>): void {
     this.routes.push(def as unknown as AnyRouteDef);
     const container = this.container;
-    const limit =
-      def.rateLimitPerMinute ??
-      (def.auth === 'agent'
-        ? container.config.rateLimits.anonymousPerMinute
-        : def.auth === 'none'
-          ? 120
-          : 600);
+    const limit = def.rateLimitPerMinute ?? (def.auth === 'none' ? 120 : 600);
 
     this.app.route({
       method: def.method,
       url: def.path,
       config: {
         rawBody: def.rawBody ?? false,
-        rateLimit: {
-          max: async (req: FastifyRequest) => {
-            if (def.auth !== 'agent') return limit;
-            const agent = await resolveAgent(req, container);
-            return agent.partner
-              ? (def.rateLimitPerMinute ?? container.config.rateLimits.partnerPerMinute)
-              : limit;
-          },
-          timeWindow: '1 minute',
-          keyGenerator: (req: FastifyRequest) => {
-            const key = req.headers['x-api-key'];
-            return typeof key === 'string' ? `key:${key.slice(0, 24)}` : `ip:${req.ip}`;
-          },
-        },
+        rateLimit:
+          def.auth === 'agent'
+            ? agentRateLimit(container, def.rateLimitPerMinute)
+            : {
+                max: limit,
+                timeWindow: '1 minute',
+                keyGenerator: (req: FastifyRequest) => `ip:${req.ip}`,
+              },
       },
       handler: async (req, reply) => {
         // Authenticate before looking at the query or body so unauthorized callers learn nothing.

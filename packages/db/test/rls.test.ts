@@ -132,6 +132,15 @@ describe('tenant isolation', () => {
     expect(message).toMatch(/permission denied/);
   });
 
+  it('tenants cannot read the cross-hotel agent log or partner keys', async () => {
+    for (const table of ['agent_queries', 'agent_clients', 'webhook_events']) {
+      const message = await pgError(
+        db.tenant(orgA, ({ tx }) => tx.execute(sql.raw(`select * from ${table}`))),
+      );
+      expect(message, table).toMatch(/permission denied/);
+    }
+  });
+
   it('the system context sees every organization', async () => {
     const rows = await db.system(
       async ({ tx }) =>

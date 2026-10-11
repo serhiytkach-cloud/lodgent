@@ -1,4 +1,5 @@
 import type { Tx } from '../client';
+import { holdRepo } from './bookings';
 import { offerQuoteRepo, pmsConnectionRepo, policyRepo, ratePlanRepo, roomTypeRepo } from './pms';
 import { attributeAssignmentRepo, crawlRepo, descriptionSuggestionRepo, embeddingRepo } from './profile';
 import {
@@ -30,6 +31,7 @@ export function tenantRepos(tx: Tx, orgId: string) {
     descriptions: descriptionSuggestionRepo(tx, orgId),
     embeddings: embeddingRepo(tx, orgId),
     crawls: crawlRepo(tx, orgId),
+    holds: holdRepo(tx, orgId),
   };
 }
 

@@ -67,6 +67,10 @@ export function createJobHandlers(container: Container): Record<string, JobHandl
       const { orgId, crawlId } = CrawlPayload.parse(payload);
       await services.websiteImport.run(orgId, crawlId);
     },
+    'holds.expire': async (_payload, ctx) => {
+      const expired = await db.system(({ holds }) => holds.expireDue(clock.now()));
+      if (expired > 0) ctx.logger.info({ expired }, 'holds expired');
+    },
     'offers.cleanup': async () => {
       await db.system(({ pms }) =>
         pms.deleteExpiredQuotes(new Date(clock.now().getTime() - 24 * 3600 * 1000)),

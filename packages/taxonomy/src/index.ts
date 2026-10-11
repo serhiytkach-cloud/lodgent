@@ -97,3 +97,5 @@ export function displayValue(def: AttributeDefinition, value: unknown): string {
   if (def.valueType === 'enum') return String(value).replace(/_/g, ' ');
   return String(value);
 }
+
+export { type InterpretedRequirement, interpretRequirement, normalizePhrase } from './interpret';

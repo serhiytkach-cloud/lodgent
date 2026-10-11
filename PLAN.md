@@ -48,11 +48,12 @@ Legend: `[x]` done · `[~]` partly done or limited (see note) · `[ ]` not start
 - [x] Embeddings (pgvector, 512 dims) refreshed on publish and on profile changes
 
 ### M4: Agent surface (MCP + REST)
-- [ ] MCP server at `/mcp` (Streamable HTTP): `search_hotels`, `get_hotel`, `get_offers`, `create_hold`, `get_hold_status`
-- [ ] Same capabilities as REST, OpenAPI 3.1 at `/openapi.json`
-- [ ] Deterministic, explainable ranking: hard attribute filters + pgvector similarity + price fit
-- [ ] Partner API keys, anonymous access with strict rate limits, query/hold logging with no guest PII
-- [ ] `scripts/agent-sim.ts`; docs for MCP Inspector and Claude Desktop
+- [x] MCP server at `/mcp` (Streamable HTTP, SDK v2, stateless): `search_hotels`, `get_hotel`, `get_offers`, `create_hold`, `get_hold_status` (ADR 0008)
+- [x] Same capabilities as REST, OpenAPI 3.1 at `/openapi.json`
+- [x] Deterministic, explainable ranking: hard attribute filters + pgvector similarity + price fit
+- [x] Partner API keys (`partner-key` CLI), anonymous access with strict rate limits, query/hold logging with no guest PII
+- [x] `scripts/agent-sim.ts`; docs for MCP Inspector, Claude Code and Claude Desktop (`docs/agents.md`)
+- [x] Holds (TTL, live re-check, per-room-type locking, signed checkout link) and the hold-expiry job
 
 ### M5: Holds, checkout, payments, reservations
 - [ ] Hold TTL (default 15 min); holds live in Lodgent; offer re-verified at payment time

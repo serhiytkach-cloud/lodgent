@@ -1,5 +1,9 @@
+export { sql } from 'drizzle-orm';
 export { Database, type DatabaseOptions, type Orm, type Tx } from './client';
 export { migrationsFolder, runMigrations } from './migrate';
+export type { AgentClientRow, NewAgentEvent, NewAgentQuery } from './repositories/agents';
+export type { HoldRow, HoldStatus, NewHold } from './repositories/bookings';
+export type { CatalogProperty } from './repositories/catalog';
 export type {
   NewOfferQuote,
   OfferQuoteRow,

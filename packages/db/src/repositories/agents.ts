@@ -1,8 +1,10 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Tx } from '../client';
-import { agentClients } from '../schema';
+import { agentClients, agentEvents, agentQueries } from '../schema';
 
 export type AgentClientRow = typeof agentClients.$inferSelect;
+export type NewAgentQuery = typeof agentQueries.$inferInsert;
+export type NewAgentEvent = typeof agentEvents.$inferInsert;
 
 export function agentClientRepo(tx: Tx) {
   return {
@@ -30,6 +32,19 @@ export function agentClientRepo(tx: Tx) {
         .where(and(eq(agentClients.id, id), isNull(agentClients.revokedAt)))
         .returning();
       return row;
+    },
+  };
+}
+
+/** Agent request log and per-hotel funnel events (written in the system context). */
+export function agentLogRepo(tx: Tx) {
+  return {
+    async insertQuery(values: NewAgentQuery): Promise<string> {
+      const [row] = await tx.insert(agentQueries).values(values).returning({ id: agentQueries.id });
+      return row!.id;
+    },
+    async insertEvents(values: NewAgentEvent[]): Promise<void> {
+      if (values.length > 0) await tx.insert(agentEvents).values(values);
     },
   };
 }

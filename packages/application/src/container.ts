@@ -29,7 +29,9 @@ import { SesMailer, SmtpMailer } from './infra/mailer';
 import { PgJobQueue, SqsJobQueue } from './infra/queue';
 import { Signer } from './infra/signing';
 import { AccountService } from './services/accounts';
+import { AgentService } from './services/agent';
 import { AgentClientService } from './services/agent-clients';
+import { AgentLog } from './services/agent-log';
 import { AuditService } from './services/audit';
 import { CatalogService } from './services/catalog';
 import { InventoryService } from './services/inventory';
@@ -85,9 +87,30 @@ function createServices(config: AppConfig, a: Adapters) {
     embeddings: a.embeddings,
     webBaseUrl: config.webBaseUrl,
   });
+  const offers = new OfferService({
+    db: a.db,
+    clock: a.clock,
+    connections: pmsConnections,
+    cacheTtlSeconds: config.business.offerCacheTtlSeconds,
+    validityMinutes: config.business.offerValidityMinutes,
+  });
   return {
     pmsConnections,
     catalog,
+    offers,
+    agent: new AgentService({
+      db: a.db,
+      clock: a.clock,
+      embeddings: a.embeddings,
+      offers,
+      catalog,
+      signer: a.signer,
+      log: new AgentLog(a.db, a.logger),
+      logger: a.logger,
+      webBaseUrl: config.webBaseUrl,
+      holdTtlMinutes: config.business.holdTtlMinutes,
+      offerCacheTtlSeconds: config.business.offerCacheTtlSeconds,
+    }),
     profile: new ProfileService({
       db: a.db,
       clock: a.clock,
@@ -116,13 +139,6 @@ function createServices(config: AppConfig, a: Adapters) {
       clock: a.clock,
       logger: a.logger,
       webhookToken: config.apaleo.webhookToken,
-    }),
-    offers: new OfferService({
-      db: a.db,
-      clock: a.clock,
-      connections: pmsConnections,
-      cacheTtlSeconds: config.business.offerCacheTtlSeconds,
-      validityMinutes: config.business.offerValidityMinutes,
     }),
     inventory: new InventoryService(a.db),
     accounts: new AccountService(a.db, a.clock),

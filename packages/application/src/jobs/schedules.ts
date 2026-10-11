@@ -23,6 +23,12 @@ export const SCHEDULES: Schedule[] = [
     job: { type: 'pms.sync-all', payload: {} },
   },
   {
+    name: 'holds-expire',
+    everyMinutes: 1,
+    expression: 'rate(1 minute)',
+    job: { type: 'holds.expire', payload: {} },
+  },
+  {
     name: 'offers-cleanup',
     everyMinutes: 60,
     expression: 'rate(1 hour)',

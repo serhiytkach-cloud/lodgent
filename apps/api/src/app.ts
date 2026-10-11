@@ -8,7 +8,9 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { registerErrorHandler } from './http/errors';
 import { buildOpenApi } from './http/openapi';
 import { Router } from './http/router';
+import { registerMcpEndpoint } from './mcp/server';
 import { registerAccountRoutes } from './routes/account';
+import { registerAgentRoutes } from './routes/agent';
 import { registerIntegrationRoutes } from './routes/integrations';
 import { registerOrganizationRoutes } from './routes/organizations';
 import { registerProfileRoutes } from './routes/profile';
@@ -82,6 +84,8 @@ export async function buildApp(container: Container): Promise<App> {
   registerPropertyRoutes(router, container);
   registerIntegrationRoutes(router, container);
   registerProfileRoutes(router, container);
+  registerAgentRoutes(router, container);
+  registerMcpEndpoint(server, container);
 
   server.get('/healthz', async () => ({ ok: true, service: `${BRAND.slug}-api` }));
   server.get('/readyz', async (_req, reply) => {

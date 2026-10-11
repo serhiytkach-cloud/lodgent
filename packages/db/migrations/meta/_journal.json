@@ -57,6 +57,20 @@
       "when": 1791692009479,
       "tag": "0007_profile_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791694071607,
+      "tag": "0008_agents",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791694072419,
+      "tag": "0009_agents_rls",
+      "breakpoints": true
     }
   ]
 }
