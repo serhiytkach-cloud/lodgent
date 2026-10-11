@@ -57,7 +57,8 @@ export default async function BookingPage({
           <CardContent>
             {b.piiRedactedAt ? (
               <p className="text-sm text-muted-foreground">
-                Guest details were erased on {formatDate(b.piiRedactedAt)} under the data retention policy.
+                Guest details were erased on {formatDate(b.piiRedactedAt)}, under the data retention policy or
+                at the guest’s request.
               </p>
             ) : (
               <dl>

@@ -16,9 +16,22 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgId
       <PageHeader
         title="Settings"
         actions={
-          <Link href={`/app/${orgId}/settings/connections`} className="text-sm text-primary hover:underline">
-            Connections →
-          </Link>
+          <>
+            {readOnly ? null : (
+              <Link
+                href={`/app/${orgId}/settings/guest-data`}
+                className="text-sm text-primary hover:underline"
+              >
+                Guest data →
+              </Link>
+            )}
+            <Link
+              href={`/app/${orgId}/settings/connections`}
+              className="text-sm text-primary hover:underline"
+            >
+              Connections →
+            </Link>
+          </>
         }
       />
       <Card>
